@@ -1,0 +1,7 @@
+*.png
+*.jpg
+000/
+*.mp4
+*.pldata
+*.npy
+*.pth
