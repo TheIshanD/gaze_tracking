@@ -1,206 +1,181 @@
-"""
-Data extraction and preprocessing for gaze prediction.
-Handles fixation data extraction from video and gaze position data.
-"""
-
 import numpy as np
 import pandas as pd
 import cv2
 import os
 
 
-def extract_fixation_data(gaze_folder="000", export_number="000"):
+def extract_fixation_frames(gaze_folder="000"):
     """
-    Extract ONE sample per fixation (not per frame).
-    For each fixation:
-      - Extract the middle frame as the representative image
-      - Calculate median gaze position across ALL frames in the fixation
-    
+    Extract all frames for each fixation (not just the middle one).
+    Each frame within a fixation is paired with the fixation’s median gaze position.
+
     Returns:
-        list of dicts with keys: 'frame', 'gaze_x', 'gaze_y', 'fixation_id', 'frame_number'
+        list of dicts with keys:
+        'frame', 'gaze_x', 'gaze_y', 'fixation_id', 'frame_number'
     """
-    print("Extracting fixation data (one sample per fixation)...")
-    
-    # Load fixation data
+    print("Extracting all fixation frames...")
+
+    # Load fixation data and gaze data
     fixations = pd.read_csv(os.path.join(gaze_folder, "FixationData.csv"))
-    
-    # Load gaze positions
-    gaze_data_path = os.path.join(gaze_folder, 'gaze_positions.csv')
-    gaze_data = pd.read_csv(gaze_data_path)
-    
-    # Load world video
-    world_video_path = os.path.join(gaze_folder, 'world.mp4')
+    gaze_data = pd.read_csv(os.path.join(gaze_folder, "gaze_positions.csv"))
+    world_video_path = os.path.join(gaze_folder, "world.mp4")
     cap = cv2.VideoCapture(world_video_path)
-    
-    training_data = []
+
+    all_data = []
     filtered_count = 0
-    
-    # Loop through each fixation
+
     for idx, fix in fixations.iterrows():
         start_frame = int(fix.StartFrame)
         end_frame = int(fix.EndFrame)
-        
+        n_frames = end_frame - start_frame + 1
+
         print(f"Processing fixation {idx+1}/{len(fixations)}: frames {start_frame}-{end_frame}")
-        
-        # Get the middle frame as representative image
-        middle_frame = (start_frame + end_frame) // 2
-        
-        # Read the middle frame
-        cap.set(cv2.CAP_PROP_POS_FRAMES, middle_frame)
-        ret, frame = cap.read()
-        
-        if not ret:
-            print(f"  WARNING: Could not read frame {middle_frame}")
-            continue
-        
-        # Collect ALL gaze positions across this entire fixation
+
+        # Get gaze samples for this fixation
         fixation_gaze_data = gaze_data[
             (gaze_data.world_index >= start_frame) & 
             (gaze_data.world_index <= end_frame)
         ]
-        
+
         if len(fixation_gaze_data) == 0:
-            print(f"  WARNING: No gaze data for this fixation")
+            print(f"  WARNING: No gaze data for fixation {idx}")
             continue
-        
-        # Calculate median gaze position across ALL samples in this fixation
-        gaze_x_values = fixation_gaze_data.norm_pos_x.values
-        gaze_y_values = fixation_gaze_data.norm_pos_y.values
-        
-        # Remove NaN values
-        valid_mask = ~(np.isnan(gaze_x_values) | np.isnan(gaze_y_values))
-        gaze_x_values = gaze_x_values[valid_mask]
-        gaze_y_values = gaze_y_values[valid_mask]
-        
+
+        # Median gaze position across fixation
+        gaze_x_values = fixation_gaze_data.norm_pos_x.dropna().values
+        gaze_y_values = fixation_gaze_data.norm_pos_y.dropna().values
         if len(gaze_x_values) == 0:
+            print(f"  WARNING: All gaze values NaN for fixation {idx}")
             filtered_count += 1
-            print(f"  WARNING: All gaze data is NaN for this fixation")
             continue
-        
-        # Median gaze across the entire fixation
+
         gaze_x = np.median(gaze_x_values)
         gaze_y = 1 - np.median(gaze_y_values)  # Flip Y
-        
-        # FILTER: Skip gaze coordinates outside [0, 1] range
-        if gaze_x < 0 or gaze_x > 1 or gaze_y < 0 or gaze_y > 1:
+
+        # Skip invalid gaze coordinates
+        if not (0 <= gaze_x <= 1 and 0 <= gaze_y <= 1):
             filtered_count += 1
-            print(f"  Filtered: gaze_x={gaze_x:.4f}, gaze_y={gaze_y:.4f} (out of range)")
+            print(f"  Filtered: invalid gaze ({gaze_x:.3f}, {gaze_y:.3f})")
             continue
-        
-        # DIAGNOSTIC: Print first few valid samples
-        if len(training_data) < 5:
-            print(f"  Valid sample {len(training_data)}: gaze_x={gaze_x:.4f}, gaze_y={gaze_y:.4f} "
-                  f"(from {len(gaze_x_values)} gaze samples)")
-        
-        training_data.append({
-            'frame': frame,
-            'gaze_x': float(gaze_x),
-            'gaze_y': float(gaze_y),
-            'fixation_id': idx,
-            'frame_number': middle_frame,
-            'n_frames': end_frame - start_frame + 1,
-            'n_gaze_samples': len(gaze_x_values)
-        })
-    
+
+        # Extract every frame in the fixation
+        for frame_number in range(start_frame, end_frame + 1):
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
+            ret, frame = cap.read()
+            if not ret:
+                print(f"  WARNING: Could not read frame {frame_number}")
+                continue
+
+            all_data.append({
+                'frame': frame,
+                'gaze_x': float(gaze_x),
+                'gaze_y': float(gaze_y),
+                'fixation_id': idx,
+                'frame_number': frame_number
+            })
+
     cap.release()
-    
-    print(f"\nExtracted {len(training_data)} fixations (one sample per fixation)")
-    print(f"Filtered out {filtered_count} fixations (NaN or out of [0,1] range)")
-    
-    if len(training_data) > 0:
-        avg_frames = np.mean([d['n_frames'] for d in training_data])
-        avg_samples = np.mean([d['n_gaze_samples'] for d in training_data])
-        print(f"Average frames per fixation: {avg_frames:.1f}")
-        print(f"Average gaze samples per fixation: {avg_samples:.1f}")
-    
-    return training_data
+    print(f"\nExtracted {len(all_data)} frame samples total.")
+    print(f"Filtered out {filtered_count} fixations (NaN or out of range).")
+    return all_data, len(fixations)
 
 
-def save_dataset(data, output_folder):
+def split_and_save_dataset(data, n_fixations, train_ratio=0.8, output_folder="dataset"):
     """
-    Save extracted data to disk to avoid re-processing.
+    Split data by fixation index (chronologically), not randomly.
+    First train_ratio% fixations → training, remainder → validation.
     """
-    print(f"Saving dataset to {output_folder}...")
     os.makedirs(output_folder, exist_ok=True)
-    
-    # Save images
-    image_folder = os.path.join(output_folder, 'images')
-    os.makedirs(image_folder, exist_ok=True)
-    
-    labels = []
+    train_folder = os.path.join(output_folder, "train")
+    val_folder = os.path.join(output_folder, "val")
+
+    os.makedirs(os.path.join(train_folder, "images"), exist_ok=True)
+    os.makedirs(os.path.join(val_folder, "images"), exist_ok=True)
+
+    train_labels, val_labels = [], []
+
+    cutoff_fixation = int(train_ratio * n_fixations)
+    print(f"Splitting fixations: first {cutoff_fixation}/{n_fixations} for training.")
+
     for i, item in enumerate(data):
-        # Save image
-        img_path = os.path.join(image_folder, f'fixation_{i:06d}.jpg')
-        cv2.imwrite(img_path, item['frame'])
-        
-        # Save label
-        labels.append({
+        folder = train_folder if item["fixation_id"] < cutoff_fixation else val_folder
+        img_folder = os.path.join(folder, "images")
+
+        img_path = os.path.join(img_folder, f'frame_{i:06d}.jpg')
+        cv2.imwrite(img_path, item["frame"])
+
+        label_entry = {
             'image_path': img_path,
             'gaze_x': item['gaze_x'],
             'gaze_y': item['gaze_y'],
             'fixation_id': item['fixation_id'],
-            'frame_number': item['frame_number'],
-            'n_frames': item['n_frames'],
-            'n_gaze_samples': item['n_gaze_samples']
-        })
-    
-    # Save labels CSV
-    labels_df = pd.DataFrame(labels)
-    labels_df.to_csv(os.path.join(output_folder, 'labels.csv'), index=False)
-    
-    print("Dataset saved!")
+            'frame_number': item['frame_number']
+        }
 
+        if folder == train_folder:
+            train_labels.append(label_entry)
+        else:
+            val_labels.append(label_entry)
 
-def load_saved_dataset(dataset_folder):
-    """
-    Load a previously saved dataset and filter out any out-of-range values.
-    """
-    print(f"Loading dataset from {dataset_folder}...")
-    
-    labels_path = os.path.join(dataset_folder, 'labels.csv')
-    labels_df = pd.read_csv(labels_path)
-    
-    data = []
-    filtered_count = 0
-    
-    for _, row in labels_df.iterrows():
-        gaze_x = row['gaze_x']
-        gaze_y = row['gaze_y']
-        
-        # Filter out-of-range values
-        if gaze_x < 0 or gaze_x > 1 or gaze_y < 0 or gaze_y > 1:
-            filtered_count += 1
-            continue
-        
-        data.append({
-            'image_path': row['image_path'],
-            'gaze_x': gaze_x,
-            'gaze_y': gaze_y,
-            'fixation_id': row.get('fixation_id', -1),
-            'frame_number': row['frame_number']
-        })
-    
-    print(f"Loaded {len(data)} valid fixations")
-    if filtered_count > 0:
-        print(f"Filtered out {filtered_count} fixations with out-of-range gaze values")
-    
-    return data
+    # Save labels
+    pd.DataFrame(train_labels).to_csv(os.path.join(train_folder, "labels.csv"), index=False)
+    pd.DataFrame(val_labels).to_csv(os.path.join(val_folder, "labels.csv"), index=False)
 
+    print(f"Saved {len(train_labels)} training samples and {len(val_labels)} validation samples.")
 
-def split_data(data, train_ratio=0.8):
+def load_train_val_data(dataset_folder):
     """
-    Split data into train and validation sets.
-    Since we have one sample per fixation, random splitting is now appropriate.
+    Load previously saved training and validation datasets.
+
+    Args:
+        dataset_folder (str): Path to the dataset root folder that contains
+                              'train/' and 'val/' subfolders.
+
+    Returns:
+        (train_data, val_data): Two lists of dicts with keys:
+            'image_path', 'gaze_x', 'gaze_y', 'fixation_id', 'frame_number'
     """
-    n_train = int(len(data) * train_ratio)
-    
-    # Shuffle
-    np.random.seed(42)
-    indices = np.random.permutation(len(data))
-    
-    train_data = [data[i] for i in indices[:n_train]]
-    val_data = [data[i] for i in indices[n_train:]]
-    
-    print(f"Train fixations: {len(train_data)}, Val fixations: {len(val_data)}")
-    
+    train_folder = os.path.join(dataset_folder, "train")
+    val_folder = os.path.join(dataset_folder, "val")
+
+    train_labels_path = os.path.join(train_folder, "labels.csv")
+    val_labels_path = os.path.join(val_folder, "labels.csv")
+
+    if not os.path.exists(train_labels_path) or not os.path.exists(val_labels_path):
+        raise FileNotFoundError(
+            f"Could not find 'labels.csv' in {train_folder} or {val_folder}. "
+            f"Make sure you ran the extraction and saving pipeline first."
+        )
+
+    def load_split(labels_path):
+        df = pd.read_csv(labels_path)
+        data = []
+        filtered = 0
+        for _, row in df.iterrows():
+            gaze_x, gaze_y = row["gaze_x"], row["gaze_y"]
+            if not (0 <= gaze_x <= 1 and 0 <= gaze_y <= 1):
+                filtered += 1
+                continue
+            data.append({
+                "image_path": row["image_path"],
+                "gaze_x": float(gaze_x),
+                "gaze_y": float(gaze_y),
+                "fixation_id": int(row["fixation_id"]),
+                "frame_number": int(row["frame_number"])
+            })
+        if filtered > 0:
+            print(f"Filtered out {filtered} samples with invalid gaze coords from {labels_path}")
+        return data
+
+    print(f"Loading train data from {train_labels_path}...")
+    train_data = load_split(train_labels_path)
+
+    print(f"Loading val data from {val_labels_path}...")
+    val_data = load_split(val_labels_path)
+
+    print(f"Loaded {len(train_data)} training samples and {len(val_data)} validation samples.")
     return train_data, val_data
+
+
+# data, n_fixations = extract_fixation_frames("../input_data/session_1")
+# split_and_save_dataset(data, n_fixations, train_ratio=0.8, output_folder="../processed_data/session_1")

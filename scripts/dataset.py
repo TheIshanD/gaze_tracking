@@ -48,3 +48,94 @@ class GazeDataset(Dataset):
         gaze = torch.tensor([item['gaze_x'], item['gaze_y']], dtype=torch.float32)
         
         return image, gaze
+    
+import torch
+from torch.utils.data import Dataset
+from torchvision import transforms
+import cv2
+from PIL import Image
+import numpy as np
+
+
+class MultiFrameGazeDataset(Dataset):
+    """
+    PyTorch Dataset for gaze prediction using the current frame and the past 3 frames.
+    Each sample returns a 12-channel tensor (4 RGB frames concatenated along channel dim)
+    and a normalized gaze coordinate (x, y).
+    """
+    def __init__(self, data, transform=None, load_from_disk=False):
+        self.data = sorted(data, key=lambda x: x["frame_number"])  # ensure chronological order
+        self.load_from_disk = load_from_disk
+        
+        # Default transform: resize and normalize (applied per frame)
+        if transform is None:
+            self.base_transform = transforms.Compose([
+                transforms.Resize((224, 224)),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                     std=[0.229, 0.224, 0.225])
+            ])
+        else:
+            self.base_transform = transform
+    
+    def __len__(self):
+        return len(self.data)
+    
+    def _load_image(self, item):
+        """Load image from disk or memory and convert to RGB PIL Image."""
+        if self.load_from_disk:
+            image = cv2.imread(item["image_path"])
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        else:
+            image = cv2.cvtColor(item["frame"], cv2.COLOR_BGR2RGB)
+        return Image.fromarray(image)
+    
+    def _get_past_frames(self, idx):
+        """
+        Collect up to 3 past frames (previous frame_number values).
+        If not enough valid past frames (start or cut), repeat the earliest available frame.
+        """
+        current_item = self.data[idx]
+        current_frame_num = current_item["frame_number"]
+        past_frames = [current_item]
+        last_valid = current_item
+
+        for offset in range(1, 4):
+            prev_idx = idx - offset
+            if prev_idx < 0:
+                # Start of dataset — pad with earliest available valid frame
+                past_frames.append(last_valid)
+                continue
+
+            prev_item = self.data[prev_idx]
+            if abs(current_frame_num - prev_item["frame_number"]) > 3:
+                # Too far back — reuse last valid (either current or most recent)
+                past_frames.append(last_valid)
+            else:
+                past_frames.append(prev_item)
+                last_valid = prev_item
+
+        # Reverse to chronological order (oldest → newest)
+        past_frames = list(reversed(past_frames))
+        return past_frames
+
+    def __getitem__(self, idx):
+        # Get 4 chronological frames (past 3 + current)
+        frame_items = self._get_past_frames(idx)
+
+        transformed_frames = []
+        for item in frame_items:
+            img = self._load_image(item)
+            img_t = self.base_transform(img)
+            transformed_frames.append(img_t)
+
+        # Stack into 12-channel tensor
+        stacked = torch.cat(transformed_frames, dim=0)  # shape [12, H, W]
+
+        # Gaze label (same for all frames)
+        gaze = torch.tensor(
+            [frame_items[-1]["gaze_x"], frame_items[-1]["gaze_y"]],
+            dtype=torch.float32
+        )
+
+        return stacked, gaze
