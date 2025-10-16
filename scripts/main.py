@@ -9,7 +9,7 @@ import torch
 from torch.utils.data import DataLoader
 
 # Import custom modules
-from data_extraction import extract_fixation_frames, load_train_val_data, split_and_save_dataset
+from data_extraction import extract_fixation_frames, load_train_val_data, split_and_save_dataset, extract_fixation_frames_per_frame
 from dataset import GazeDataset, MultiFrameGazeDataset
 from model import SimpleGazeNet, GazeNetResNet, FrozenResNetBackbone, TinyGazeNet, UNetResNet18Gaze, UNetResNet18MultiFrameGaze, LightUNetResNet18MultiFrameGaze
 from training import train_model
@@ -28,10 +28,10 @@ def main():
 
     # -------- Configuration --------
     GAZE_DATA_FOLDER = "../input_data/session_1/"         # Raw gaze data + video
-    DATASET_FOLDER = "../processed_data/session_1/"       # Where to save/load processed dataset
+    DATASET_FOLDER = "../processed_data/session_1/gaze_data"       # Where to save/load processed dataset
 
-    BEST_MODEL_FILE_NAME = "../models/heatmap_softmax_multi_image.pth" 
-    VALIDATION_PREDICTION_OUTPUT = "../predictions/session_1_validation_predictions/heatmap_softmax_multi_image"
+    BEST_MODEL_FILE_NAME = "../models/heatmap_softmax_multi_image_gaze.pth" 
+    VALIDATION_PREDICTION_OUTPUT = "../predictions/session_1_validation_predictions/heatmap_softmax_multi_image_gaze"
 
     BATCH_SIZE = 16
     EPOCHS = 50000
@@ -41,7 +41,7 @@ def main():
     # -------- Data Preparation --------
     if not os.path.exists(DATASET_FOLDER) or not os.path.exists(os.path.join(DATASET_FOLDER, "train")):
         print("=== EXTRACTING DATA (ALL FRAMES PER FIXATION) ===")
-        data, n_fixations = extract_fixation_frames(GAZE_DATA_FOLDER)
+        data, n_fixations = extract_fixation_frames_per_frame(GAZE_DATA_FOLDER)
         split_and_save_dataset(data, n_fixations, train_ratio=TRAIN_RATIO, output_folder=DATASET_FOLDER)
     else:
         print("=== USING EXISTING DATASET ===")

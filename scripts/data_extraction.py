@@ -79,6 +79,113 @@ def extract_fixation_frames(gaze_folder="000"):
     print(f"Filtered out {filtered_count} fixations (NaN or out of range).")
     return all_data, len(fixations)
 
+def extract_fixation_frames_per_frame(gaze_folder="000"):
+    """
+    Extract all frames for each fixation, pairing each frame with the specific gaze data for that frame.
+    
+    Rules:
+      - If multiple gaze points exist for a frame, take the median.
+      - If a frame has no gaze points, use the most recent valid gaze point within the fixation.
+      - If no previous valid gaze point exists, use the fixation's overall median.
+      - Skip frames where the chosen gaze is invalid (not in [0, 1]).
+    
+    Returns:
+        list of dicts with keys:
+        'frame', 'gaze_x', 'gaze_y', 'fixation_id', 'frame_number'
+    """
+    print("Extracting per-frame gaze samples...")
+
+    fixations = pd.read_csv(os.path.join(gaze_folder, "FixationData.csv"))
+    gaze_data = pd.read_csv(os.path.join(gaze_folder, "gaze_positions.csv"))
+    world_video_path = os.path.join(gaze_folder, "world.mp4")
+    cap = cv2.VideoCapture(world_video_path)
+
+    all_data = []
+    filtered_count = 0
+
+    for idx, fix in fixations.iterrows():
+        start_frame = int(fix.StartFrame)
+        end_frame = int(fix.EndFrame)
+        fixation_gaze_data = gaze_data[
+            (gaze_data.world_index >= start_frame) &
+            (gaze_data.world_index <= end_frame)
+        ]
+
+        if len(fixation_gaze_data) == 0:
+            print(f"  WARNING: No gaze data for fixation {idx}")
+            continue
+
+        # Compute fixation-level median as fallback
+        fix_gaze_x_vals = fixation_gaze_data.norm_pos_x.dropna().values
+        fix_gaze_y_vals = fixation_gaze_data.norm_pos_y.dropna().values
+        if len(fix_gaze_x_vals) == 0:
+            print(f"  WARNING: All gaze values NaN for fixation {idx}")
+            filtered_count += 1
+            continue
+
+        fixation_median_x = np.median(fix_gaze_x_vals)
+        fixation_median_y = 1 - np.median(fix_gaze_y_vals)  # Flip Y
+
+        if not (0 <= fixation_median_x <= 1 and 0 <= fixation_median_y <= 1):
+            print(f"  Filtered fixation {idx}: invalid median gaze ({fixation_median_x:.3f}, {fixation_median_y:.3f})")
+            filtered_count += 1
+            continue
+
+        print(f"Processing fixation {idx+1}/{len(fixations)}: frames {start_frame}-{end_frame}")
+
+        last_valid_gaze = None
+        for frame_number in range(start_frame, end_frame + 1):
+            # All gaze samples for this frame
+            frame_gaze_samples = fixation_gaze_data[
+                fixation_gaze_data.world_index == frame_number
+            ]
+
+            if len(frame_gaze_samples) > 0:
+                gx = frame_gaze_samples.norm_pos_x.dropna().values
+                gy = frame_gaze_samples.norm_pos_y.dropna().values
+
+                if len(gx) > 0:
+                    gaze_x = np.median(gx)
+                    gaze_y = 1 - np.median(gy)  # Flip Y
+                    last_valid_gaze = (gaze_x, gaze_y)
+                else:
+                    # No valid samples for this frame
+                    if last_valid_gaze is not None:
+                        gaze_x, gaze_y = last_valid_gaze
+                    else:
+                        gaze_x, gaze_y = fixation_median_x, fixation_median_y
+            else:
+                # No samples for this frame
+                if last_valid_gaze is not None:
+                    gaze_x, gaze_y = last_valid_gaze
+                else:
+                    gaze_x, gaze_y = fixation_median_x, fixation_median_y
+
+            # Skip invalid gaze coordinates
+            if not (0 <= gaze_x <= 1 and 0 <= gaze_y <= 1):
+                print(f"  Frame {frame_number}: invalid gaze ({gaze_x:.3f}, {gaze_y:.3f}) — skipped")
+                filtered_count += 1
+                continue
+
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
+            ret, frame = cap.read()
+            if not ret:
+                print(f"  WARNING: Could not read frame {frame_number}")
+                continue
+
+            all_data.append({
+                'frame': frame,
+                'gaze_x': float(gaze_x),
+                'gaze_y': float(gaze_y),
+                'fixation_id': idx,
+                'frame_number': frame_number
+            })
+
+    cap.release()
+    print(f"\nExtracted {len(all_data)} per-frame samples total.")
+    print(f"Filtered out {filtered_count} frames (invalid gaze or missing data).")
+    return all_data, len(fixations)
+
 
 def split_and_save_dataset(data, n_fixations, train_ratio=0.8, output_folder="dataset"):
     """
