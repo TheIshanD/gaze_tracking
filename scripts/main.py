@@ -39,7 +39,7 @@ def main():
     TRAIN_RATIO = 0.8  # portion of fixations used for training
 
     # -------- Data Preparation --------
-    if not os.path.exists(DATASET_FOLDER) or not os.path.exists(os.path.join(DATASET_FOLDER, "train")):
+    if not os.path.exists(DATASET_FOLDER) or not os.path.exists(os.path.join(DATASET_FOLDER, "train")) or not os.path.exists(os.path.join(DATASET_FOLDER, "train", "images")):
         print("=== EXTRACTING DATA (ALL FRAMES PER FIXATION) ===")
         data, n_fixations = extract_fixation_frames_per_frame(GAZE_DATA_FOLDER)
         split_and_save_dataset(data, n_fixations, train_ratio=TRAIN_RATIO, output_folder=DATASET_FOLDER)
