@@ -52,14 +52,38 @@ def main():
     train_dataset = MultiFrameGazeDataset(train_data, load_from_disk=True)
     val_dataset = MultiFrameGazeDataset(val_data, load_from_disk=True)
 
-    train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=0)
-    val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
+    # -------- Dataloader Setup --------
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f"\n=== USING DEVICE: {device} ===")
+
+    if device.type == 'cuda':
+        train_loader = DataLoader(
+            train_dataset,
+            batch_size=BATCH_SIZE,
+            shuffle=True,
+            num_workers=8,              
+            pin_memory=True,         
+            persistent_workers=True,   
+            prefetch_factor=4,         
+        )
+        val_loader = DataLoader(
+            val_dataset,
+            batch_size=BATCH_SIZE,
+            shuffle=False,
+            num_workers=4,
+            pin_memory=True,
+            persistent_workers=True,
+            prefetch_factor=2,
+        )
+    else:
+        train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=0)
+        val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
+
 
     # -------- Diagnostics: Visualize Batch --------
     # visualize_batch(train_loader, n_samples=4)
     
     # -------- Model Setup --------
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"\n=== CREATING MODEL (device: {device}) ===")
 
     model = UNetResNet18MultiFrameGaze().to(device)

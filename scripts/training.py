@@ -15,8 +15,8 @@ def train_epoch(model, train_loader, criterion, optimizer, device):
     total_loss = 0
     
     for images, gaze_targets in train_loader:
-        images = images.to(device)
-        gaze_targets = gaze_targets.to(device)
+        images = images.to(device, non_blocking=True)
+        gaze_targets = gaze_targets.to(device, non_blocking=True)
         
         # Forward pass
         optimizer.zero_grad()
