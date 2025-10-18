@@ -551,3 +551,131 @@ class LightUNetResNet18MultiFrameGaze(nn.Module):
 
     def get_loss_function(self):
         return nn.MSELoss()
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torchvision.models import resnet18
+
+class UNetTemporalAttentionGaze(nn.Module):
+    """
+    Hybrid Temporal Fusion Gaze Model with Temporal Attention
+    - Input: 4 RGB frames (B, 4, 3, H, W)
+    - Encoder: ResNet18 (shared across frames)
+    - Temporal Fusion: Temporal self-attention over encoded features
+    - Decoder: UNet-style upsampling
+    - Output: heatmap + gaze (via softmax) or direct (x, y) MLP regression
+    """
+
+    def __init__(self, num_frames=4, heatmap_size=(28, 28), pretrained=True, mode="heatmap"):
+        super().__init__()
+        assert mode in ["heatmap", "mlp"], "mode must be 'heatmap' or 'mlp'"
+        self.num_frames = num_frames
+        self.heatmap_size = heatmap_size
+        self.mode = mode
+
+        # ---------------- Encoder ----------------
+        base = resnet18(weights='DEFAULT' if pretrained else None)
+        self.encoder = nn.Sequential(*list(base.children())[:-2])  # remove avgpool, fc
+        self.feature_dim = 512  # ResNet18 final conv output channels
+
+        # ---------------- Temporal Attention ----------------
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=self.feature_dim, nhead=8, dim_feedforward=1024, batch_first=True
+        )
+        self.temporal_attention = nn.TransformerEncoder(encoder_layer, num_layers=1)
+
+        # ---------------- Decoder (UNet-style) ----------------
+        self.up4 = nn.Sequential(
+            nn.ConvTranspose2d(512, 256, kernel_size=2, stride=2),
+            nn.BatchNorm2d(256),
+            nn.ReLU(inplace=True)
+        )
+        self.up3 = nn.Sequential(
+            nn.ConvTranspose2d(256, 128, kernel_size=2, stride=2),
+            nn.BatchNorm2d(128),
+            nn.ReLU(inplace=True)
+        )
+        self.up2 = nn.Sequential(
+            nn.ConvTranspose2d(128, 64, kernel_size=2, stride=2),
+            nn.BatchNorm2d(64),
+            nn.ReLU(inplace=True)
+        )
+        self.up1 = nn.Sequential(
+            nn.ConvTranspose2d(64, 32, kernel_size=2, stride=2),
+            nn.BatchNorm2d(32),
+            nn.ReLU(inplace=True)
+        )
+
+        # Heatmap output head
+        self.heatmap_conv = nn.Conv2d(32, 1, kernel_size=1)
+
+        # ---------------- MLP Head (for direct gaze regression) ----------------
+        self.mlp_head = nn.Sequential(
+            nn.Linear(self.feature_dim, 256),
+            nn.ReLU(inplace=True),
+            nn.Linear(256, 2)
+        )
+
+    def forward(self, x):
+        """
+        x: [B, T, 3, H, W]
+        Returns:
+            if mode == "heatmap": (gaze_xy, heatmap)
+            if mode == "mlp": gaze_xy
+        """
+        B, T, C, H, W = x.shape
+        assert T == self.num_frames, f"Expected {self.num_frames} frames, got {T}"
+
+        # ----- Encode each frame -----
+        feats = []
+        for t in range(T):
+            f = self.encoder(x[:, t])  # [B, 512, H', W']
+            feats.append(f)
+
+        feats = torch.stack(feats, dim=1)  # [B, T, 512, H', W']
+        Hf, Wf = feats.shape[-2:]
+
+        # Flatten spatial dims → attention over time
+        feats_flat = feats.flatten(3).permute(0, 3, 1, 2)  # [B, HW, T, C]
+        feats_flat = feats_flat.reshape(B * Hf * Wf, T, self.feature_dim)
+
+        # ----- Temporal Attention -----
+        fused = self.temporal_attention(feats_flat)  # [B*HW, T, C]
+        fused = fused.mean(dim=1)                    # average over time
+        fused = fused.view(B, Hf, Wf, self.feature_dim).permute(0, 3, 1, 2)  # [B, C, H', W']
+
+        if self.mode == "mlp":
+            # Global avg pool + MLP → (x, y)
+            pooled = F.adaptive_avg_pool2d(fused, 1).view(B, self.feature_dim)
+            gaze = self.mlp_head(pooled)
+            return gaze
+
+        # ----- Decode via UNet upsampling -----
+        d4 = self.up4(fused)
+        d3 = self.up3(d4)
+        d2 = self.up2(d3)
+        d1 = self.up1(d2)
+
+        heatmap = self.heatmap_conv(d1)
+        heatmap = F.interpolate(heatmap, size=self.heatmap_size, mode='bilinear', align_corners=False)
+
+        gaze = self.spatial_softmax_2d(heatmap)
+        return gaze, heatmap
+
+    @staticmethod
+    def spatial_softmax_2d(heatmap):
+        """Convert [B, 1, H, W] heatmap → normalized gaze (x, y) in [0, 1]"""
+        B, _, H, W = heatmap.shape
+        softmax = F.softmax(heatmap.view(B, -1), dim=1).view(B, 1, H, W)
+
+        pos_x = torch.linspace(0, 1, W, device=heatmap.device)
+        pos_y = torch.linspace(0, 1, H, device=heatmap.device)
+        grid_y, grid_x = torch.meshgrid(pos_y, pos_x, indexing='ij')
+
+        exp_x = torch.sum(softmax[:, 0] * grid_x, dim=[1, 2])
+        exp_y = torch.sum(softmax[:, 0] * grid_y, dim=[1, 2])
+        return torch.stack([exp_x, exp_y], dim=1)
+
+    def get_loss_function(self):
+        return nn.MSELoss()
