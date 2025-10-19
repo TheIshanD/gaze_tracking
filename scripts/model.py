@@ -559,18 +559,13 @@ from torchvision.models import resnet18
 
 class UNetTemporalAttentionGaze(nn.Module):
     """
-    Hybrid Temporal Fusion Gaze Model with Temporal Attention + Regularization
-    - Input: num_frames RGB frames (B, num_frames * 3, H, W)
-    - Encoder: ResNet18 (shared across frames)
-    - Temporal Fusion: Transformer attention (if num_frames > 1)
+    Hybrid Temporal Fusion Gaze Model (Optimized)
+    -------------------------------------------------
+    - Encoder: ResNet18 shared across frames
+    - Temporal Fusion: Transformer attention over frame-level pooled features
+      (massively faster than per-pixel attention)
     - Decoder: UNet-style upsampling
-    - Output: heatmap + gaze (via softmax) or direct (x, y) MLP regression
-    
-    Improvements for overfitting:
-    - L2 regularization on encoder
-    - Dropout layers
-    - Reduced model capacity (fewer decoder channels)
-    - Batch normalization momentum tuning
+    - Output: heatmap + gaze (via softmax) or direct (x, y) regression
     """
 
     def __init__(self, num_frames=4, heatmap_size=(28, 28), pretrained=True, mode="heatmap", dropout_rate=0.3):
@@ -583,35 +578,30 @@ class UNetTemporalAttentionGaze(nn.Module):
 
         # ---------------- Encoder ----------------
         base = resnet18(weights='DEFAULT' if pretrained else None)
-        self.encoder = nn.Sequential(*list(base.children())[:-2])  # remove avgpool, fc
-        
-        # Freeze early layers to reduce overfitting (optional, remove if you have limited data)
-        # for param in list(self.encoder.parameters())[:-8]:
-        #     param.requires_grad = False
-        
-        self.feature_dim = 512  # ResNet18 final conv output channels
+        self.encoder = nn.Sequential(*list(base.children())[:-2])
+        self.feature_dim = 512
 
         # Dropout after encoder
         self.encoder_dropout = nn.Dropout2d(p=dropout_rate)
 
-        # ---------------- Temporal Attention (only if T > 1) ----------------
+        # ---------------- Temporal Attention (frame-level) ----------------
         if num_frames > 1:
             encoder_layer = nn.TransformerEncoderLayer(
-                d_model=self.feature_dim, 
-                nhead=8, 
-                dim_feedforward=1024, 
+                d_model=self.feature_dim,
+                nhead=8,
+                dim_feedforward=1024,
                 batch_first=True,
-                dropout=dropout_rate,  # Added dropout in transformer
-                activation='gelu'       # Slightly different activation
+                dropout=dropout_rate,
+                activation='gelu'
             )
             self.temporal_attention = nn.TransformerEncoder(encoder_layer, num_layers=1)
         else:
             self.temporal_attention = None
 
-        # ---------------- Decoder (UNet-style, reduced capacity) ----------------
+        # ---------------- Decoder (UNet-style) ----------------
         self.up4 = nn.Sequential(
             nn.ConvTranspose2d(512, 256, kernel_size=2, stride=2),
-            nn.BatchNorm2d(256, momentum=0.1),  # Increased momentum for smaller batches
+            nn.BatchNorm2d(256, momentum=0.1),
             nn.ReLU(inplace=True),
             nn.Dropout2d(p=dropout_rate)
         )
@@ -634,10 +624,10 @@ class UNetTemporalAttentionGaze(nn.Module):
             nn.Dropout2d(p=dropout_rate)
         )
 
-        # Heatmap output head
+        # Heatmap output
         self.heatmap_conv = nn.Conv2d(32, 1, kernel_size=1)
 
-        # ---------------- MLP Head (for direct gaze regression) ----------------
+        # MLP Head for direct regression
         self.mlp_head = nn.Sequential(
             nn.Linear(self.feature_dim, 256),
             nn.ReLU(inplace=True),
@@ -652,41 +642,40 @@ class UNetTemporalAttentionGaze(nn.Module):
         """
         x: [B, T*3, H, W]
         Returns:
-            if mode == "heatmap": (gaze_xy, heatmap)
-            if mode == "mlp": gaze_xy
+            if mode == "heatmap": (x, y) coordinates from heatmap
+            if mode == "mlp": direct (x, y) regression
         """
         B, C, H, W = x.shape
         C_per_frame = C // self.num_frames
         x = x.view(B, self.num_frames, C_per_frame, H, W)
 
-        # ----- Encode each frame (batch all frames together) -----
-        # Reshape to [B*T, 3, H, W] for efficient batch processing
+        # Encode all frames
         x_flat = x.reshape(B * self.num_frames, C_per_frame, H, W)
-        feats_flat = self.encoder(x_flat)  # [B*T, 512, H', W']
-        
-        # Reshape back to [B, T, 512, H', W']
-        feats = feats_flat.view(B, self.num_frames, self.feature_dim, feats_flat.shape[-2], feats_flat.shape[-1])
-        feats = self.encoder_dropout(feats_flat).view_as(feats)
-        Hf, Wf = feats.shape[-2:]
+        feats_flat = self.encoder(x_flat)  # [B*T, 512, Hf, Wf]
+        feats_flat = self.encoder_dropout(feats_flat)
 
-        # ----- Temporal Fusion -----
+        # Restore temporal dimension
+        Hf, Wf = feats_flat.shape[-2:]
+        feats = feats_flat.view(B, self.num_frames, self.feature_dim, Hf, Wf)
+
+        # Frame-level pooling for attention
+        pooled_feats = F.adaptive_avg_pool2d(feats, 1).squeeze(-1).squeeze(-1)  # [B, T, C]
+
+        # Temporal attention across frames
         if self.temporal_attention is not None:
-            feats_flat = feats.flatten(3).permute(0, 3, 1, 2)  # [B, HW, T, C]
-            feats_flat = feats_flat.reshape(B * Hf * Wf, self.num_frames, self.feature_dim)
-
-            fused = self.temporal_attention(feats_flat)  # [B*HW, T, C]
-            fused = fused.mean(dim=1)                    # average over time
-            fused = fused.view(B, Hf, Wf, self.feature_dim).permute(0, 3, 1, 2)  # [B, C, H', W']
+            fused_feats = self.temporal_attention(pooled_feats)  # [B, T, C]
+            fused_frame = fused_feats.mean(dim=1)                # [B, C]
         else:
-            fused = feats[:, 0]  # [B, C, H', W']
+            fused_frame = pooled_feats[:, 0]
 
-        # ----- Output -----
+        # Expand fused representation spatially
+        fused = fused_frame.view(B, self.feature_dim, 1, 1).expand(B, self.feature_dim, Hf, Wf)
+
         if self.mode == "mlp":
-            pooled = F.adaptive_avg_pool2d(fused, 1).view(B, self.feature_dim)
-            gaze = self.mlp_head(pooled)
+            gaze = self.mlp_head(fused_frame)
             return gaze
 
-        # Decode via UNet upsampling
+        # UNet decoder for heatmap
         d4 = self.up4(fused)
         d3 = self.up3(d4)
         d2 = self.up2(d3)
@@ -700,21 +689,18 @@ class UNetTemporalAttentionGaze(nn.Module):
 
     @staticmethod
     def spatial_softmax_2d(heatmap):
-        """Convert [B, 1, H, W] heatmap → normalized gaze (x, y) in [0, 1]"""
+        """Convert [B, 1, H, W] heatmap → normalized gaze (x, y) in [0, 1]."""
         B, _, H, W = heatmap.shape
         softmax = F.softmax(heatmap.view(B, -1), dim=1).view(B, 1, H, W)
-
         pos_x = torch.linspace(0, 1, W, device=heatmap.device)
         pos_y = torch.linspace(0, 1, H, device=heatmap.device)
         grid_y, grid_x = torch.meshgrid(pos_y, pos_x, indexing='ij')
-
         exp_x = torch.sum(softmax[:, 0] * grid_x, dim=[1, 2])
         exp_y = torch.sum(softmax[:, 0] * grid_y, dim=[1, 2])
         return torch.stack([exp_x, exp_y], dim=1)
 
     def get_loss_function(self):
         return nn.MSELoss()
-
 
 # ============ Training Loop with L2 Regularization ============
 def train_epoch(model, dataloader, optimizer, device, weight_decay=1e-4):
