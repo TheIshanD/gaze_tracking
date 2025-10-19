@@ -39,6 +39,8 @@ def main():
     TRAIN_RATIO = 0.8  # portion of fixations used for training
     NUM_FRAMES = 4 # Number of frames to use as temporal context
 
+    USE_NORMALIZED_COORDINATES = True
+
     # -------- Data Preparation --------
     if not os.path.exists(DATASET_FOLDER) or not os.path.exists(os.path.join(DATASET_FOLDER, "train")) or not os.path.exists(os.path.join(DATASET_FOLDER, "train", "images")):
         print("=== EXTRACTING DATA (ALL FRAMES PER FIXATION) ===")
@@ -114,13 +116,14 @@ def main():
             lr=LEARNING_RATE,
             device=device,
             best_model_file_name=BEST_MODEL_FILE_NAME,
+            use_normalized=USE_NORMALIZED_COORDINATES
         )
     else:
         print("\n=== SKIPPING TRAINING (Validation Only Mode) ===")
 
     # -------- Validation + Visualization --------
     print("\n=== GENERATING VALIDATION VISUALIZATIONS ===")
-    validate_and_visualize(model, val_dataset, device, output_folder=VALIDATION_PREDICTION_OUTPUT)
+    validate_and_visualize(model, val_dataset, device, output_folder=VALIDATION_PREDICTION_OUTPUT, use_normalized=USE_NORMALIZED_COORDINATES)
     
     print("\n=== DONE ===")
     print(f"Best model saved to {BEST_MODEL_FILE_NAME}")
