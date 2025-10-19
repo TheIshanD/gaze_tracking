@@ -127,6 +127,7 @@ def main():
 
     # -------- Validation + Visualization --------
     print("\n=== GENERATING VALIDATION VISUALIZATIONS ===")
+    # model.load_state_dict(torch.load(BEST_MODEL_FILE_NAME, map_location=device))
     validate_and_visualize(model, val_dataset, device, output_folder=VALIDATION_PREDICTION_OUTPUT, use_normalized=USE_NORMALIZED_COORDINATES)
 
     print("\n=== STITCHING IMAGES TO VIDEO ===")

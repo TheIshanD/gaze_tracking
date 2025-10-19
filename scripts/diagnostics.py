@@ -106,9 +106,9 @@ def baseline_mean_predictor(val_loader, device):
     print(f"Mean gaze position: ({mean_gaze[0]:.4f}, {mean_gaze[1]:.4f})")
     
     # Calculate error
-    errors = torch.norm((all_gazes - mean_gaze) * torch.tensor([1920, 1080]), dim=1)
-    print(f"Baseline error (always predict mean): {errors.mean().item():.1f} pixels")
-    print(f"Baseline error std: {errors.std().item():.1f} pixels")
+    errors = torch.norm((all_gazes - mean_gaze), dim=1)
+    print(f"Baseline error (always predict mean): {errors.mean().item():.6f} normalized units")
+    print(f"Baseline error std: {errors.std().item():.6f} normalized units")
     print("="*60 + "\n")
     
     return errors.mean().item()

@@ -40,6 +40,10 @@ def validate_and_visualize(model, val_dataset, device, output_folder='validation
             else:
                 orig_image = item['frame'].copy()
             
+            # Convert RGB to BGR if needed (cv2 uses BGR)
+            if orig_image.shape[2] == 3:
+                orig_image = cv2.cvtColor(orig_image, cv2.COLOR_RGB2BGR)
+            
             # Get image dimensions
             h, w = orig_image.shape[:2]
             
@@ -58,11 +62,11 @@ def validate_and_visualize(model, val_dataset, device, output_folder='validation
             pred_x = int(gaze_pred[0].item() * w)
             pred_y = int(gaze_pred[1].item() * h)
             
-            # Draw prediction on image (red circle)
+            # Draw prediction on image (red circle in BGR)
             cv2.circle(orig_image, (pred_x, pred_y), radius=8, color=(0, 0, 255), thickness=-1)
             cv2.circle(orig_image, (pred_x, pred_y), radius=10, color=(0, 0, 255), thickness=2)
             
-            # Optional: draw ground truth (green circle) for comparison
+            # Draw ground truth (green circle in BGR)
             gt_x = int(gaze_target[0].item() * w)
             gt_y = int(gaze_target[1].item() * h)
             cv2.circle(orig_image, (gt_x, gt_y), radius=8, color=(0, 255, 0), thickness=-1)
