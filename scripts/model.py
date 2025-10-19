@@ -659,10 +659,14 @@ class UNetTemporalAttentionGaze(nn.Module):
         C_per_frame = C // self.num_frames
         x = x.view(B, self.num_frames, C_per_frame, H, W)
 
-        # ----- Encode each frame -----
-        feats = [self.encoder(x[:, t]) for t in range(self.num_frames)]
-        feats = torch.stack(feats, dim=1)  # [B, T, 512, H', W']
-        feats = self.encoder_dropout(feats.reshape(B * self.num_frames, *feats.shape[2:])).reshape_as(feats)
+        # ----- Encode each frame (batch all frames together) -----
+        # Reshape to [B*T, 3, H, W] for efficient batch processing
+        x_flat = x.reshape(B * self.num_frames, C_per_frame, H, W)
+        feats_flat = self.encoder(x_flat)  # [B*T, 512, H', W']
+        
+        # Reshape back to [B, T, 512, H', W']
+        feats = feats_flat.view(B, self.num_frames, self.feature_dim, feats_flat.shape[-2], feats_flat.shape[-1])
+        feats = self.encoder_dropout(feats_flat).view_as(feats)
         Hf, Wf = feats.shape[-2:]
 
         # ----- Temporal Fusion -----
