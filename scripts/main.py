@@ -7,6 +7,7 @@ import os
 import argparse
 import torch
 from torch.utils.data import DataLoader
+import torch.nn as nn
 
 # Import custom modules
 from data_extraction import extract_fixation_frames, load_train_val_data, split_and_save_dataset, extract_fixation_frames_per_frame, extract_all_valid_gaze_frames
@@ -91,51 +92,58 @@ def main():
     # visualize_batch(train_loader, n_samples=4)
     
     # -------- Model Setup --------
-    print(f"\n=== CREATING MODEL (device: {device}) ===")
+    for mode in ["heatmap", "mlp"]:
+        for criterion in [nn.MSELoss(), nn.L1Loss(), nn.SmoothL1Loss()]:
+            for RUN_NUM in range(4):
+                print("RUN NUMBER: " + str(RUN_NUM))
+                for NUM_FRAMES in [1, 2, 4, 8]:
+                    print("USING NUM_FRAMES: " + str(NUM_FRAMES))
+                    print(f"\n=== CREATING MODEL (device: {device}) ===")
 
-    model = UNetTemporalAttentionGaze(num_frames=NUM_FRAMES, mode="heatmap").to(device)
-    
-    if os.path.exists(BEST_MODEL_FILE_NAME):
-        print(f"Loading saved model from {BEST_MODEL_FILE_NAME}...")
-        model.load_state_dict(torch.load(BEST_MODEL_FILE_NAME, map_location=device))
-        print("Model loaded successfully!")
-    else:
-        print("No saved model found, starting from scratch...")
+                    model = UNetTemporalAttentionGaze(num_frames=NUM_FRAMES, mode=mode).to(device)
+                    
+                    # if os.path.exists(BEST_MODEL_FILE_NAME):
+                    #     print(f"Loading saved model from {BEST_MODEL_FILE_NAME}...")
+                    #     model.load_state_dict(torch.load(BEST_MODEL_FILE_NAME, map_location=device))
+                    #     print("Model loaded successfully!")
+                    # else:
+                    #     print("No saved model found, starting from scratch...")
 
-    n_params = sum(p.numel() for p in model.parameters())
-    print(f"Model has {n_params:,} parameters")
+                    # n_params = sum(p.numel() for p in model.parameters())
+                    # print(f"Model has {n_params:,} parameters")
 
-    # -------- Baseline and Diagnostics --------
-    baseline_error = baseline_mean_predictor(val_loader, device)
-    diagnose_model(model, train_loader, val_loader, device, use_normalized=USE_NORMALIZED_COORDINATES)
-    
-    # -------- Train or Skip --------
-    if not args.no_train:
-        print("\n=== TRAINING ===")
-        model = train_model(
-            model,
-            train_loader,
-            val_loader,
-            epochs=EPOCHS,
-            lr=LEARNING_RATE,
-            device=device,
-            best_model_file_name=BEST_MODEL_FILE_NAME,
-            use_normalized=USE_NORMALIZED_COORDINATES
-        )
-    else:
-        print("\n=== SKIPPING TRAINING (Validation Only Mode) ===")
+                    # # -------- Baseline and Diagnostics --------
+                    # baseline_error = baseline_mean_predictor(val_loader, device)
+                    # diagnose_model(model, train_loader, val_loader, device, use_normalized=USE_NORMALIZED_COORDINATES)
+                    
+                    # -------- Train or Skip --------
+                    if not args.no_train:
+                        print("\n=== TRAINING ===")
+                        model = train_model(
+                            model,
+                            train_loader,
+                            val_loader,
+                            epochs=EPOCHS,
+                            lr=LEARNING_RATE,
+                            device=device,
+                            best_model_file_name=BEST_MODEL_FILE_NAME,
+                            use_normalized=USE_NORMALIZED_COORDINATES,
+                            criterion=criterion
+                        )
+                    else:
+                        print("\n=== SKIPPING TRAINING (Validation Only Mode) ===")
 
-    # -------- Validation + Visualization --------
-    print("\n=== GENERATING VALIDATION VISUALIZATIONS ===")
-    # model.load_state_dict(torch.load(BEST_MODEL_FILE_NAME, map_location=device))
-    validate_and_visualize(model, val_dataset, device, output_folder=VALIDATION_PREDICTION_OUTPUT, use_normalized=USE_NORMALIZED_COORDINATES)
+    # # -------- Validation + Visualization --------
+    # print("\n=== GENERATING VALIDATION VISUALIZATIONS ===")
+    # # model.load_state_dict(torch.load(BEST_MODEL_FILE_NAME, map_location=device))
+    # validate_and_visualize(model, val_dataset, device, output_folder=VALIDATION_PREDICTION_OUTPUT, use_normalized=USE_NORMALIZED_COORDINATES)
 
-    print("\n=== STITCHING IMAGES TO VIDEO ===")
-    stitch_images_to_video(VALIDATION_PREDICTION_OUTPUT, frame_rate=OUTPUT_FRAME_RATE)
+    # print("\n=== STITCHING IMAGES TO VIDEO ===")
+    # stitch_images_to_video(VALIDATION_PREDICTION_OUTPUT, frame_rate=OUTPUT_FRAME_RATE)
 
-    print("\n=== DONE ===")
-    print(f"Best model saved to {BEST_MODEL_FILE_NAME}")
-    print(f"Validation predictions saved to: {VALIDATION_PREDICTION_OUTPUT}")
+    # print("\n=== DONE ===")
+    # print(f"Best model saved to {BEST_MODEL_FILE_NAME}")
+    # print(f"Validation predictions saved to: {VALIDATION_PREDICTION_OUTPUT}")
 
 
 if __name__ == "__main__":

@@ -79,11 +79,10 @@ def validate(model, val_loader, criterion, device, use_normalized=True):
     
     return avg_loss, avg_error_pixels
 
-def train_model(model, train_loader, val_loader, epochs=50, lr=0.001, device='cuda', best_model_file_name='best_gaze_model.pth', use_normalized=True):
+def train_model(model, train_loader, val_loader, epochs=50, lr=0.001, device='cuda', best_model_file_name='best_gaze_model.pth', use_normalized=True, criterion=nn.MSELoss()):
     """
     Full training loop.
     """
-    criterion = model.get_loss_function()
     optimizer = optim.Adam(model.parameters(), lr=lr)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', patience=5, factor=0.5)
     
