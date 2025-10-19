@@ -35,8 +35,8 @@ def main():
     BATCH_SIZE = 16
     EPOCHS = 15
     LEARNING_RATE = 0.001
-    TRAIN_RATIO = 0.8  # portion of fixations used for training
-    NUM_FRAMES = 8 # Number of frames to use as temporal context
+    TRAIN_RATIO = 0.9  # portion of fixations used for training
+    NUM_FRAMES = 1 # Number of frames to use as temporal context
     USE_NORMALIZED_COORDINATES = True
 
 
@@ -48,16 +48,16 @@ def main():
     # -------- Data Preparation --------
     if not os.path.exists(DATASET_FOLDER) or not os.path.exists(os.path.join(DATASET_FOLDER, "train")) or not os.path.exists(os.path.join(DATASET_FOLDER, "train", "images")):
         print("=== EXTRACTING DATA (ALL FRAMES PER FIXATION) ===")
-        data, n_fixations = extract_all_valid_gaze_frames(GAZE_DATA_FOLDER)
-        split_and_save_dataset(data, n_fixations, train_ratio=TRAIN_RATIO, output_folder=DATASET_FOLDER)
+        data, num_frames = extract_all_valid_gaze_frames(GAZE_DATA_FOLDER)
+        split_and_save_dataset(data, num_frames, train_ratio=TRAIN_RATIO, output_folder=DATASET_FOLDER)
     else:
         print("=== USING EXISTING DATASET ===")
 
     train_data, val_data = load_train_val_data(DATASET_FOLDER)
     check_data_quality(train_data + val_data)
 
-    train_dataset = MultiFrameGazeDataset(train_data, num_frames=NUM_FRAMES, load_from_disk=False)
-    val_dataset = MultiFrameGazeDataset(val_data, num_frames=NUM_FRAMES, load_from_disk=False)
+    train_dataset = MultiFrameGazeDataset(train_data, num_frames=NUM_FRAMES, load_from_disk=True)
+    val_dataset = MultiFrameGazeDataset(val_data, num_frames=NUM_FRAMES, load_from_disk=True)
 
     # -------- Dataloader Setup --------
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')

@@ -187,7 +187,7 @@ def extract_fixation_frames_per_frame(gaze_folder="000"):
     return all_data, len(fixations)
 
 
-def split_and_save_dataset(data, n_fixations, train_ratio=0.8, output_folder="dataset"):
+def split_and_save_dataset_fixations(data, n_fixations, train_ratio=0.8, output_folder="dataset"):
     """
     Split data by fixation index (chronologically), not randomly.
     First train_ratio% fixations → training, remainder → validation.
@@ -216,6 +216,46 @@ def split_and_save_dataset(data, n_fixations, train_ratio=0.8, output_folder="da
             'gaze_x': item['gaze_x'],
             'gaze_y': item['gaze_y'],
             'fixation_id': item['fixation_id'],
+            'frame_number': item['frame_number']
+        }
+
+        if folder == train_folder:
+            train_labels.append(label_entry)
+        else:
+            val_labels.append(label_entry)
+
+    # Save labels
+    pd.DataFrame(train_labels).to_csv(os.path.join(train_folder, "labels.csv"), index=False)
+    pd.DataFrame(val_labels).to_csv(os.path.join(val_folder, "labels.csv"), index=False)
+
+    print(f"Saved {len(train_labels)} training samples and {len(val_labels)} validation samples.")
+
+def split_and_save_dataset(data, num_frames, train_ratio=0.8, output_folder="dataset"):
+    """
+    Split data by fixation index (chronologically), not randomly.
+    First train_ratio% fixations → training, remainder → validation.
+    """
+    os.makedirs(output_folder, exist_ok=True)
+    train_folder = os.path.join(output_folder, "train")
+    val_folder = os.path.join(output_folder, "val")
+
+    os.makedirs(os.path.join(train_folder, "images"), exist_ok=True)
+    os.makedirs(os.path.join(val_folder, "images"), exist_ok=True)
+
+    train_labels, val_labels = [], []
+
+    for i, item in enumerate(data):
+        folder = train_folder if item["frame_number"] < int(num_frames * train_ratio) else val_folder
+        img_folder = os.path.join(folder, "images")
+
+        img_path = os.path.join(img_folder, f'frame_{i:06d}.jpg')
+        cv2.imwrite(img_path, item["frame"])
+
+        label_entry = {
+            'image_path': img_path,
+            'gaze_x': item['gaze_x'],
+            'gaze_y': item['gaze_y'],
+            # 'fixation_id': item['fixation_id'],
             'frame_number': item['frame_number']
         }
 
@@ -267,7 +307,7 @@ def load_train_val_data(dataset_folder):
                 "image_path": row["image_path"],
                 "gaze_x": float(gaze_x),
                 "gaze_y": float(gaze_y),
-                "fixation_id": int(row["fixation_id"]),
+                # "fixation_id": int(row["fixation_id"]),
                 "frame_number": int(row["frame_number"])
             })
         if filtered > 0:
@@ -311,6 +351,7 @@ def extract_all_valid_gaze_frames(gaze_folder="000"):
     all_data = []
     skipped = 0
 
+    num_frames = 0
     for frame_number, group in grouped:
         gaze_x = np.median(group.norm_pos_x.values)
         gaze_y = 1 - np.median(group.norm_pos_y.values)  # flip Y to image coordinates
@@ -334,10 +375,12 @@ def extract_all_valid_gaze_frames(gaze_folder="000"):
             "frame_number": int(frame_number)
         })
 
+        num_frames = max(int(frame_number) + 1, num_frames)
+
     cap.release()
     print(f"\nExtracted {len(all_data)} valid frames total.")
     print(f"Skipped {skipped} frames (invalid gaze or unreadable).")
-    return all_data
+    return all_data, num_frames
 
 
 # data, n_fixations = extract_fixation_frames("../input_data/session_1")
