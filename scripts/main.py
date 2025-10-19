@@ -15,6 +15,8 @@ from model import SimpleGazeNet, GazeNetResNet, FrozenResNetBackbone, TinyGazeNe
 from training import train_model
 from diagnostics import check_data_quality, visualize_batch, baseline_mean_predictor, diagnose_model
 from visualization import validate_and_visualize
+from stitch_images_to_videos import stitch_images_to_video
+
 
 
 def main():
@@ -30,16 +32,18 @@ def main():
     GAZE_DATA_FOLDER = "../input_data/session_1/"         # Raw gaze data + video
     DATASET_FOLDER = "../processed_data/session_1/gaze_data"       # Where to save/load processed dataset
 
-    BEST_MODEL_FILE_NAME = "../models/UNetTemporalAttentionGaze.pth"
-    VALIDATION_PREDICTION_OUTPUT = "../predictions/session_1_validation_predictions/UNetTemporalAttentionGaze"
-
     BATCH_SIZE = 16
     EPOCHS = 50000
     LEARNING_RATE = 0.001
     TRAIN_RATIO = 0.8  # portion of fixations used for training
     NUM_FRAMES = 4 # Number of frames to use as temporal context
-
     USE_NORMALIZED_COORDINATES = True
+
+
+    BEST_MODEL_FILE_NAME = f"../models/UNetTemporalAttentionGaze_{NUM_FRAMES}_frames.pth"
+    VALIDATION_PREDICTION_OUTPUT = f"../predictions/session_1_validation_predictions/UNetTemporalAttentionGaze_{NUM_FRAMES}_frames"
+
+    OUTPUT_FRAME_RATE=15
 
     # -------- Data Preparation --------
     if not os.path.exists(DATASET_FOLDER) or not os.path.exists(os.path.join(DATASET_FOLDER, "train")) or not os.path.exists(os.path.join(DATASET_FOLDER, "train", "images")):
@@ -103,7 +107,7 @@ def main():
 
     # -------- Baseline and Diagnostics --------
     baseline_error = baseline_mean_predictor(val_loader, device)
-    diagnose_model(model, train_loader, val_loader, device)
+    diagnose_model(model, train_loader, val_loader, device, use_normalized=USE_NORMALIZED_COORDINATES)
     
     # -------- Train or Skip --------
     if not args.no_train:
@@ -124,7 +128,10 @@ def main():
     # -------- Validation + Visualization --------
     print("\n=== GENERATING VALIDATION VISUALIZATIONS ===")
     validate_and_visualize(model, val_dataset, device, output_folder=VALIDATION_PREDICTION_OUTPUT, use_normalized=USE_NORMALIZED_COORDINATES)
-    
+
+    print("\n=== STITCHING IMAGES TO VIDEO ===")
+    stitch_images_to_video(VALIDATION_PREDICTION_OUTPUT, frame_rate=OUTPUT_FRAME_RATE)
+
     print("\n=== DONE ===")
     print(f"Best model saved to {BEST_MODEL_FILE_NAME}")
     print(f"Validation predictions saved to: {VALIDATION_PREDICTION_OUTPUT}")

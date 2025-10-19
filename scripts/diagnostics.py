@@ -114,7 +114,7 @@ def baseline_mean_predictor(val_loader, device):
     return errors.mean().item()
 
 
-def diagnose_model(model, train_loader, val_loader, device):
+def diagnose_model(model, train_loader, val_loader, device, use_normalized=True):
     """Run comprehensive diagnostics before training"""
     print("\n" + "="*60)
     print("MODEL DIAGNOSTICS")
@@ -136,14 +136,21 @@ def diagnose_model(model, train_loader, val_loader, device):
     with torch.no_grad():
         preds = model(images.to(device))
     
+    # Scale to pixel space if not normalized
+    if not use_normalized:
+        dims = torch.tensor([1280, 720]).to(device)
+        preds_display = preds * dims
+    else:
+        preds_display = preds
+    
     print(f"\nModel predictions (current weights):")
-    print(f"  Min: {preds.min().item():.4f}")
-    print(f"  Max: {preds.max().item():.4f}")
-    print(f"  Mean: {preds.mean().item():.4f}")
-    print(f"  Std: {preds.std().item():.4f}")
+    print(f"  Min: {preds_display.min().item():.4f}")
+    print(f"  Max: {preds_display.max().item():.4f}")
+    print(f"  Mean: {preds_display.mean().item():.4f}")
+    print(f"  Std: {preds_display.std().item():.4f}")
     
     # Check if predictions are stuck
-    if preds.std().item() < 0.01:
+    if preds_display.std().item() < 0.01:
         print("\n⚠️  WARNING: Model predictions have very low variance!")
         print("   This suggests the model might be stuck or saturated.")
     
@@ -157,7 +164,13 @@ def diagnose_model(model, train_loader, val_loader, device):
     optimizer = optim.Adam(model.parameters(), lr=0.001)
     optimizer.zero_grad()
     preds = model(images.to(device))
-    loss = criterion(preds, gazes.to(device))
+    if not use_normalized:
+        dims = torch.tensor([1280, 720]).to(device)
+        preds_display = preds * dims
+    else:
+        preds_display = preds
+
+    loss = criterion(preds_display, gazes.to(device))
     loss.backward()
     
     # Check gradient norms
