@@ -51,8 +51,8 @@ def validate(model, val_loader, criterion, device):
             
             total_loss += loss.item()
             
-            # Calculate pixel error (assuming 1920x1080 image)
-            error_pixels = torch.norm((gaze_pred - gaze_targets) * torch.tensor([1920, 1080]).to(device), dim=1)
+            # Calculate pixel error (assuming 1280, 720 image)
+            error_pixels = torch.norm((gaze_pred - gaze_targets) * torch.tensor([1280, 720]).to(device), dim=1)
             total_error_pixels += error_pixels.sum().item()
     
     avg_loss = total_loss / len(val_loader)

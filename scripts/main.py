@@ -37,6 +37,7 @@ def main():
     EPOCHS = 50000
     LEARNING_RATE = 0.001
     TRAIN_RATIO = 0.8  # portion of fixations used for training
+    NUM_FRAMES = 4 # Number of frames to use as temporal context
 
     # -------- Data Preparation --------
     if not os.path.exists(DATASET_FOLDER) or not os.path.exists(os.path.join(DATASET_FOLDER, "train")) or not os.path.exists(os.path.join(DATASET_FOLDER, "train", "images")):
@@ -49,8 +50,8 @@ def main():
     train_data, val_data = load_train_val_data(DATASET_FOLDER)
     check_data_quality(train_data + val_data)
 
-    train_dataset = MultiFrameGazeDataset(train_data, load_from_disk=False)
-    val_dataset = MultiFrameGazeDataset(val_data, load_from_disk=False)
+    train_dataset = MultiFrameGazeDataset(train_data, num_frames=NUM_FRAMES, load_from_disk=False)
+    val_dataset = MultiFrameGazeDataset(val_data, num_frames=NUM_FRAMES, load_from_disk=False)
 
     # -------- Dataloader Setup --------
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -86,7 +87,7 @@ def main():
     # -------- Model Setup --------
     print(f"\n=== CREATING MODEL (device: {device}) ===")
 
-    model = UNetTemporalAttentionGaze().to(device)
+    model = UNetTemporalAttentionGaze(num_frames=NUM_FRAMES, mode="heatmap").to(device)
     
     if os.path.exists(BEST_MODEL_FILE_NAME):
         print(f"Loading saved model from {BEST_MODEL_FILE_NAME}...")
