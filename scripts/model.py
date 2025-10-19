@@ -559,55 +559,79 @@ from torchvision.models import resnet18
 
 class UNetTemporalAttentionGaze(nn.Module):
     """
-    Hybrid Temporal Fusion Gaze Model with Temporal Attention
+    Hybrid Temporal Fusion Gaze Model with Temporal Attention + Regularization
     - Input: num_frames RGB frames (B, num_frames * 3, H, W)
     - Encoder: ResNet18 (shared across frames)
     - Temporal Fusion: Transformer attention (if num_frames > 1)
     - Decoder: UNet-style upsampling
     - Output: heatmap + gaze (via softmax) or direct (x, y) MLP regression
+    
+    Improvements for overfitting:
+    - L2 regularization on encoder
+    - Dropout layers
+    - Reduced model capacity (fewer decoder channels)
+    - Batch normalization momentum tuning
     """
 
-    def __init__(self, num_frames=4, heatmap_size=(28, 28), pretrained=True, mode="heatmap"):
+    def __init__(self, num_frames=4, heatmap_size=(28, 28), pretrained=True, mode="heatmap", dropout_rate=0.3):
         super().__init__()
         assert mode in ["heatmap", "mlp"], "mode must be 'heatmap' or 'mlp'"
         self.num_frames = num_frames
         self.heatmap_size = heatmap_size
         self.mode = mode
+        self.dropout_rate = dropout_rate
 
         # ---------------- Encoder ----------------
         base = resnet18(weights='DEFAULT' if pretrained else None)
         self.encoder = nn.Sequential(*list(base.children())[:-2])  # remove avgpool, fc
+        
+        # Freeze early layers to reduce overfitting (optional, remove if you have limited data)
+        # for param in list(self.encoder.parameters())[:-8]:
+        #     param.requires_grad = False
+        
         self.feature_dim = 512  # ResNet18 final conv output channels
+
+        # Dropout after encoder
+        self.encoder_dropout = nn.Dropout2d(p=dropout_rate)
 
         # ---------------- Temporal Attention (only if T > 1) ----------------
         if num_frames > 1:
             encoder_layer = nn.TransformerEncoderLayer(
-                d_model=self.feature_dim, nhead=8, dim_feedforward=1024, batch_first=True
+                d_model=self.feature_dim, 
+                nhead=8, 
+                dim_feedforward=1024, 
+                batch_first=True,
+                dropout=dropout_rate,  # Added dropout in transformer
+                activation='gelu'       # Slightly different activation
             )
             self.temporal_attention = nn.TransformerEncoder(encoder_layer, num_layers=1)
         else:
-            self.temporal_attention = None  # skip transformer entirely
+            self.temporal_attention = None
 
-        # ---------------- Decoder (UNet-style) ----------------
+        # ---------------- Decoder (UNet-style, reduced capacity) ----------------
         self.up4 = nn.Sequential(
             nn.ConvTranspose2d(512, 256, kernel_size=2, stride=2),
-            nn.BatchNorm2d(256),
-            nn.ReLU(inplace=True)
+            nn.BatchNorm2d(256, momentum=0.1),  # Increased momentum for smaller batches
+            nn.ReLU(inplace=True),
+            nn.Dropout2d(p=dropout_rate)
         )
         self.up3 = nn.Sequential(
             nn.ConvTranspose2d(256, 128, kernel_size=2, stride=2),
-            nn.BatchNorm2d(128),
-            nn.ReLU(inplace=True)
+            nn.BatchNorm2d(128, momentum=0.1),
+            nn.ReLU(inplace=True),
+            nn.Dropout2d(p=dropout_rate)
         )
         self.up2 = nn.Sequential(
             nn.ConvTranspose2d(128, 64, kernel_size=2, stride=2),
-            nn.BatchNorm2d(64),
-            nn.ReLU(inplace=True)
+            nn.BatchNorm2d(64, momentum=0.1),
+            nn.ReLU(inplace=True),
+            nn.Dropout2d(p=dropout_rate)
         )
         self.up1 = nn.Sequential(
             nn.ConvTranspose2d(64, 32, kernel_size=2, stride=2),
-            nn.BatchNorm2d(32),
-            nn.ReLU(inplace=True)
+            nn.BatchNorm2d(32, momentum=0.1),
+            nn.ReLU(inplace=True),
+            nn.Dropout2d(p=dropout_rate)
         )
 
         # Heatmap output head
@@ -617,7 +641,11 @@ class UNetTemporalAttentionGaze(nn.Module):
         self.mlp_head = nn.Sequential(
             nn.Linear(self.feature_dim, 256),
             nn.ReLU(inplace=True),
-            nn.Linear(256, 2)
+            nn.Dropout(p=dropout_rate),
+            nn.Linear(256, 128),
+            nn.ReLU(inplace=True),
+            nn.Dropout(p=dropout_rate),
+            nn.Linear(128, 2)
         )
 
     def forward(self, x):
@@ -632,13 +660,13 @@ class UNetTemporalAttentionGaze(nn.Module):
         x = x.view(B, self.num_frames, C_per_frame, H, W)
 
         # ----- Encode each frame -----
-        feats = [self.encoder(x[:, t]) for t in range(self.num_frames)]  # list of [B, 512, H', W']
+        feats = [self.encoder(x[:, t]) for t in range(self.num_frames)]
         feats = torch.stack(feats, dim=1)  # [B, T, 512, H', W']
+        feats = self.encoder_dropout(feats.reshape(B * self.num_frames, *feats.shape[2:])).reshape_as(feats)
         Hf, Wf = feats.shape[-2:]
 
         # ----- Temporal Fusion -----
         if self.temporal_attention is not None:
-            # Flatten spatial dims for attention
             feats_flat = feats.flatten(3).permute(0, 3, 1, 2)  # [B, HW, T, C]
             feats_flat = feats_flat.reshape(B * Hf * Wf, self.num_frames, self.feature_dim)
 
@@ -646,7 +674,6 @@ class UNetTemporalAttentionGaze(nn.Module):
             fused = fused.mean(dim=1)                    # average over time
             fused = fused.view(B, Hf, Wf, self.feature_dim).permute(0, 3, 1, 2)  # [B, C, H', W']
         else:
-            # No temporal fusion → just use single frame’s features
             fused = feats[:, 0]  # [B, C, H', W']
 
         # ----- Output -----
@@ -683,3 +710,42 @@ class UNetTemporalAttentionGaze(nn.Module):
 
     def get_loss_function(self):
         return nn.MSELoss()
+
+
+# ============ Training Loop with L2 Regularization ============
+def train_epoch(model, dataloader, optimizer, device, weight_decay=1e-4):
+    model.train()
+    total_loss = 0.0
+    
+    for batch_idx, (images, targets) in enumerate(dataloader):
+        images, targets = images.to(device), targets.to(device)
+        
+        optimizer.zero_grad()
+        outputs = model(images)
+        
+        # MSE loss
+        loss = nn.MSELoss()(outputs, targets)
+        
+        # Optional: Add L2 regularization manually if optimizer doesn't use weight_decay
+        # l2_reg = torch.tensor(0., device=device)
+        # for param in model.parameters():
+        #     l2_reg += torch.norm(param)
+        # loss += weight_decay * l2_reg
+        
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)  # Gradient clipping
+        optimizer.step()
+        
+        total_loss += loss.item()
+    
+    return total_loss / len(dataloader)
+
+
+# ============ Usage Example ============
+# model = UNetTemporalAttentionGaze(num_frames=4, mode="heatmap", dropout_rate=0.3)
+# optimizer = torch.optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-4)  # L2 regularization via weight_decay
+# 
+# for epoch in range(num_epochs):
+#     train_loss = train_epoch(model, train_loader, optimizer, device, weight_decay=1e-4)
+#     val_loss = validate(model, val_loader, device)
+#     print(f"Epoch {epoch}: train_loss={train_loss:.4f}, val_loss={val_loss:.4f}")

@@ -33,7 +33,7 @@ def main():
     DATASET_FOLDER = "../processed_data/session_1/gaze_data"       # Where to save/load processed dataset
 
     BATCH_SIZE = 16
-    EPOCHS = 50000
+    EPOCHS = 15
     LEARNING_RATE = 0.001
     TRAIN_RATIO = 0.8  # portion of fixations used for training
     NUM_FRAMES = 4 # Number of frames to use as temporal context

@@ -96,9 +96,9 @@ def train_model(model, train_loader, val_loader, epochs=50, lr=0.001, device='cu
         val_loss, val_error_px = validate(model, val_loader, criterion, device, use_normalized=use_normalized)
         
         print(f"Epoch {epoch+1}/{epochs}: "
-              f"Train Loss={train_loss:.4f}, "
-              f"Val Loss={val_loss:.4f}, "
-              f"Val Error={val_error_px:.1f}{error_units}")
+              f"Train Loss={train_loss:.6f}, "
+              f"Val Loss={val_loss:.6f}, "
+              f"Val Error={val_error_px:.6f}{error_units}")
         
         # Learning rate scheduling
         scheduler.step(val_loss)
