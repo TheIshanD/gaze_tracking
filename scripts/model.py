@@ -560,9 +560,9 @@ from torchvision.models import resnet18
 class UNetTemporalAttentionGaze(nn.Module):
     """
     Hybrid Temporal Fusion Gaze Model with Temporal Attention
-    - Input: 4 RGB frames (B, 4, 3, H, W)
+    - Input: num_frames RGB frames (B, num_frames * 3, H, W)
     - Encoder: ResNet18 (shared across frames)
-    - Temporal Fusion: Temporal self-attention over encoded features
+    - Temporal Fusion: Transformer attention (if num_frames > 1)
     - Decoder: UNet-style upsampling
     - Output: heatmap + gaze (via softmax) or direct (x, y) MLP regression
     """
@@ -579,11 +579,14 @@ class UNetTemporalAttentionGaze(nn.Module):
         self.encoder = nn.Sequential(*list(base.children())[:-2])  # remove avgpool, fc
         self.feature_dim = 512  # ResNet18 final conv output channels
 
-        # ---------------- Temporal Attention ----------------
-        encoder_layer = nn.TransformerEncoderLayer(
-            d_model=self.feature_dim, nhead=8, dim_feedforward=1024, batch_first=True
-        )
-        self.temporal_attention = nn.TransformerEncoder(encoder_layer, num_layers=1)
+        # ---------------- Temporal Attention (only if T > 1) ----------------
+        if num_frames > 1:
+            encoder_layer = nn.TransformerEncoderLayer(
+                d_model=self.feature_dim, nhead=8, dim_feedforward=1024, batch_first=True
+            )
+            self.temporal_attention = nn.TransformerEncoder(encoder_layer, num_layers=1)
+        else:
+            self.temporal_attention = None  # skip transformer entirely
 
         # ---------------- Decoder (UNet-style) ----------------
         self.up4 = nn.Sequential(
@@ -619,39 +622,40 @@ class UNetTemporalAttentionGaze(nn.Module):
 
     def forward(self, x):
         """
-        x: [B, T, 3, H, W]
+        x: [B, T*3, H, W]
         Returns:
             if mode == "heatmap": (gaze_xy, heatmap)
             if mode == "mlp": gaze_xy
         """
-        B, T, C, H, W = x.shape
-        assert T == self.num_frames, f"Expected {self.num_frames} frames, got {T}"
+        B, C, H, W = x.shape
+        C_per_frame = C // self.num_frames
+        x = x.view(B, self.num_frames, C_per_frame, H, W)
 
         # ----- Encode each frame -----
-        feats = []
-        for t in range(T):
-            f = self.encoder(x[:, t])  # [B, 512, H', W']
-            feats.append(f)
-
+        feats = [self.encoder(x[:, t]) for t in range(self.num_frames)]  # list of [B, 512, H', W']
         feats = torch.stack(feats, dim=1)  # [B, T, 512, H', W']
         Hf, Wf = feats.shape[-2:]
 
-        # Flatten spatial dims → attention over time
-        feats_flat = feats.flatten(3).permute(0, 3, 1, 2)  # [B, HW, T, C]
-        feats_flat = feats_flat.reshape(B * Hf * Wf, T, self.feature_dim)
+        # ----- Temporal Fusion -----
+        if self.temporal_attention is not None:
+            # Flatten spatial dims for attention
+            feats_flat = feats.flatten(3).permute(0, 3, 1, 2)  # [B, HW, T, C]
+            feats_flat = feats_flat.reshape(B * Hf * Wf, self.num_frames, self.feature_dim)
 
-        # ----- Temporal Attention -----
-        fused = self.temporal_attention(feats_flat)  # [B*HW, T, C]
-        fused = fused.mean(dim=1)                    # average over time
-        fused = fused.view(B, Hf, Wf, self.feature_dim).permute(0, 3, 1, 2)  # [B, C, H', W']
+            fused = self.temporal_attention(feats_flat)  # [B*HW, T, C]
+            fused = fused.mean(dim=1)                    # average over time
+            fused = fused.view(B, Hf, Wf, self.feature_dim).permute(0, 3, 1, 2)  # [B, C, H', W']
+        else:
+            # No temporal fusion → just use single frame’s features
+            fused = feats[:, 0]  # [B, C, H', W']
 
+        # ----- Output -----
         if self.mode == "mlp":
-            # Global avg pool + MLP → (x, y)
             pooled = F.adaptive_avg_pool2d(fused, 1).view(B, self.feature_dim)
             gaze = self.mlp_head(pooled)
             return gaze
 
-        # ----- Decode via UNet upsampling -----
+        # Decode via UNet upsampling
         d4 = self.up4(fused)
         d3 = self.up3(d4)
         d2 = self.up2(d3)
@@ -661,7 +665,7 @@ class UNetTemporalAttentionGaze(nn.Module):
         heatmap = F.interpolate(heatmap, size=self.heatmap_size, mode='bilinear', align_corners=False)
 
         gaze = self.spatial_softmax_2d(heatmap)
-        return gaze, heatmap
+        return gaze
 
     @staticmethod
     def spatial_softmax_2d(heatmap):

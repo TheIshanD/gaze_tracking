@@ -11,7 +11,7 @@ from torch.utils.data import DataLoader
 # Import custom modules
 from data_extraction import extract_fixation_frames, load_train_val_data, split_and_save_dataset, extract_fixation_frames_per_frame
 from dataset import GazeDataset, MultiFrameGazeDataset
-from model import SimpleGazeNet, GazeNetResNet, FrozenResNetBackbone, TinyGazeNet, UNetResNet18Gaze, UNetResNet18MultiFrameGaze, LightUNetResNet18MultiFrameGaze
+from model import SimpleGazeNet, GazeNetResNet, FrozenResNetBackbone, TinyGazeNet, UNetResNet18Gaze, UNetResNet18MultiFrameGaze, LightUNetResNet18MultiFrameGaze, UNetTemporalAttentionGaze
 from training import train_model
 from diagnostics import check_data_quality, visualize_batch, baseline_mean_predictor, diagnose_model
 from visualization import validate_and_visualize
@@ -30,8 +30,8 @@ def main():
     GAZE_DATA_FOLDER = "../input_data/session_1/"         # Raw gaze data + video
     DATASET_FOLDER = "../processed_data/session_1/gaze_data"       # Where to save/load processed dataset
 
-    BEST_MODEL_FILE_NAME = "../models/heatmap_softmax_multi_image_gaze.pth" 
-    VALIDATION_PREDICTION_OUTPUT = "../predictions/session_1_validation_predictions/heatmap_softmax_multi_image_gaze"
+    BEST_MODEL_FILE_NAME = "../models/UNetTemporalAttentionGaze.pth"
+    VALIDATION_PREDICTION_OUTPUT = "../predictions/session_1_validation_predictions/UNetTemporalAttentionGaze"
 
     BATCH_SIZE = 16
     EPOCHS = 50000
@@ -86,7 +86,7 @@ def main():
     # -------- Model Setup --------
     print(f"\n=== CREATING MODEL (device: {device}) ===")
 
-    model = UNetResNet18MultiFrameGaze().to(device)
+    model = UNetTemporalAttentionGaze().to(device)
     
     if os.path.exists(BEST_MODEL_FILE_NAME):
         print(f"Loading saved model from {BEST_MODEL_FILE_NAME}...")
