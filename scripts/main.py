@@ -49,8 +49,8 @@ def main():
     train_data, val_data = load_train_val_data(DATASET_FOLDER)
     check_data_quality(train_data + val_data)
 
-    train_dataset = MultiFrameGazeDataset(train_data, load_from_disk=True)
-    val_dataset = MultiFrameGazeDataset(val_data, load_from_disk=True)
+    train_dataset = MultiFrameGazeDataset(train_data, load_from_disk=False)
+    val_dataset = MultiFrameGazeDataset(val_data, load_from_disk=False)
 
     # -------- Dataloader Setup --------
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')

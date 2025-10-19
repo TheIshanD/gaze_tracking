@@ -16,7 +16,7 @@ class GazeDataset(Dataset):
     def __init__(self, data, transform=None, load_from_disk=False):
         self.data = data
         self.load_from_disk = load_from_disk
-        
+
         # Default transform: resize and normalize
         if transform is None:
             self.transform = transforms.Compose([
@@ -72,6 +72,17 @@ class MultiFrameGazeDataset(Dataset):
         self.num_frames = num_frames
         self.load_from_disk = load_from_disk
 
+        if not self.load_from_disk:
+            for item in self.data:
+                if "image_path" not in item:
+                    raise ValueError(f"Item missing 'image_path': {item}")
+                frame = cv2.imread(item["image_path"])
+                if frame is None:
+                    raise ValueError(f"Failed to load image: {item['image_path']}")
+                # Convert to RGB upfront to save memory and conversion time
+                item["frame"] = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+
         # Default transform: resize and normalize (applied per frame)
         if transform is None:
             self.base_transform = transforms.Compose([
@@ -87,12 +98,11 @@ class MultiFrameGazeDataset(Dataset):
         return len(self.data)
 
     def _load_image(self, item):
-        """Load image from disk or memory and convert to RGB PIL Image."""
         if self.load_from_disk:
             image = cv2.imread(item["image_path"])
             image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         else:
-            image = cv2.cvtColor(item["frame"], cv2.COLOR_BGR2RGB)
+            image = item["frame"]  # already RGB
         return Image.fromarray(image)
 
     def _get_past_frames(self, idx):
