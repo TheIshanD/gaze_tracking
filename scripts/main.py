@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader
 import torch.nn as nn
 
 # Import custom modules
-from data_extraction import extract_fixation_frames, load_train_val_data, split_and_save_dataset, extract_fixation_frames_per_frame, extract_all_valid_gaze_frames
+from data_extraction import extract_fixation_frames, load_train_val_data, split_and_save_dataset, extract_fixation_frames_per_frame, extract_all_valid_gaze_frames, split_and_save_dataset_fixations
 from dataset import GazeDataset, MultiFrameGazeDataset
 from model import SimpleGazeNet, GazeNetResNet, FrozenResNetBackbone, TinyGazeNet, UNetResNet18Gaze, UNetResNet18MultiFrameGaze, LightUNetResNet18MultiFrameGaze, UNetTemporalAttentionGaze
 from training import train_model
@@ -33,7 +33,7 @@ def main():
     GAZE_DATA_FOLDER = "../input_data/session_1/"         # Raw gaze data + video
     DATASET_FOLDER = "../processed_data/session_1/gaze_data"       # Where to save/load processed dataset
 
-    BATCH_SIZE = 64 * 16
+    BATCH_SIZE = 64 * 8
     EPOCHS = 10
     LEARNING_RATE = 0.001
     TRAIN_RATIO = 0.9  # portion of fixations used for training
@@ -49,56 +49,57 @@ def main():
     # -------- Data Preparation --------
     if not os.path.exists(DATASET_FOLDER) or not os.path.exists(os.path.join(DATASET_FOLDER, "train")) or not os.path.exists(os.path.join(DATASET_FOLDER, "train", "images")):
         print("=== EXTRACTING DATA (ALL FRAMES PER FIXATION) ===")
-        data, num_frames = extract_all_valid_gaze_frames(GAZE_DATA_FOLDER)
-        split_and_save_dataset(data, num_frames, train_ratio=TRAIN_RATIO, output_folder=DATASET_FOLDER)
+        data, num_frames = extract_fixation_frames(GAZE_DATA_FOLDER)
+        split_and_save_dataset_fixations(data, num_frames, train_ratio=TRAIN_RATIO, output_folder=DATASET_FOLDER)
     else:
         print("=== USING EXISTING DATASET ===")
 
     train_data, val_data = load_train_val_data(DATASET_FOLDER)
     check_data_quality(train_data + val_data)
 
-    train_dataset = MultiFrameGazeDataset(train_data, num_frames=NUM_FRAMES, load_from_disk=True)
-    val_dataset = MultiFrameGazeDataset(val_data, num_frames=NUM_FRAMES, load_from_disk=True)
+    for NUM_FRAMES in [1, 2, 4]:
+        train_dataset = MultiFrameGazeDataset(train_data, num_frames=NUM_FRAMES, load_from_disk=False)
+        val_dataset = MultiFrameGazeDataset(val_data, num_frames=NUM_FRAMES, load_from_disk=False)
 
-    # -------- Dataloader Setup --------
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f"\n=== USING DEVICE: {device} ===")
+        # -------- Dataloader Setup --------
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        print(f"\n=== USING DEVICE: {device} ===")
 
-    if device.type == 'cuda':
-        train_loader = DataLoader(
-            train_dataset,
-            batch_size=BATCH_SIZE,
-            shuffle=True,
-            num_workers=8,              
-            pin_memory=True,         
-            persistent_workers=True,   
-            prefetch_factor=4,         
-        )
-        val_loader = DataLoader(
-            val_dataset,
-            batch_size=BATCH_SIZE,
-            shuffle=False,
-            num_workers=4,
-            pin_memory=True,
-            persistent_workers=True,
-            prefetch_factor=2,
-        )
-    else:
-        train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=0)
-        val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
+        if device.type == 'cuda':
+            train_loader = DataLoader(
+                train_dataset,
+                batch_size=BATCH_SIZE,
+                shuffle=True,
+                num_workers=8,              
+                pin_memory=True,         
+                persistent_workers=True,   
+                prefetch_factor=4,         
+            )
+            val_loader = DataLoader(
+                val_dataset,
+                batch_size=BATCH_SIZE,
+                shuffle=False,
+                num_workers=4,
+                pin_memory=True,
+                persistent_workers=True,
+                prefetch_factor=2,
+            )
+        else:
+            train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=0)
+            val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
 
 
-    # -------- Diagnostics: Visualize Batch --------
-    # visualize_batch(train_loader, n_samples=4)
-    
-    # -------- Model Setup --------
-    for mode in ["heatmap", "mlp"]:
-        print("MODE: " + mode)
-        for criterion in [nn.MSELoss(), nn.L1Loss(), nn.SmoothL1Loss()]:
-            for RUN_NUM in range(4):
-                print("RUN NUMBER: " + str(RUN_NUM))
-                for NUM_FRAMES in [1, 2, 4, 8]:
-                    print("USING NUM_FRAMES: " + str(NUM_FRAMES))
+        # -------- Diagnostics: Visualize Batch --------
+        # visualize_batch(train_loader, n_samples=4)
+
+        print("USING NUM_FRAMES: " + str(NUM_FRAMES))
+        # -------- Model Setup --------
+        for mode in ["heatmap", "mlp"]:
+            print("MODE: " + mode)
+            for criterion in [nn.MSELoss(), nn.L1Loss(), nn.SmoothL1Loss(), nn.HuberLoss()]:
+                print("CRITERION: " + str(criterion))
+                for RUN_NUM in range(4):
+                    print("RUN NUMBER: " + str(RUN_NUM))
                     print(f"\n=== CREATING MODEL (device: {device}) ===")
 
                     model = UNetTemporalAttentionGaze(num_frames=NUM_FRAMES, mode=mode).to(device)

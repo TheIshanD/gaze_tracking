@@ -215,7 +215,7 @@ def split_and_save_dataset_fixations(data, n_fixations, train_ratio=0.8, output_
             'image_path': img_path,
             'gaze_x': item['gaze_x'],
             'gaze_y': item['gaze_y'],
-            'fixation_id': item['fixation_id'],
+            # 'fixation_id': item['fixation_id'],
             'frame_number': item['frame_number']
         }
 

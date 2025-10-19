@@ -105,7 +105,7 @@ def train_model(model, train_loader, val_loader, epochs=50, lr=0.001, device='cu
         # Save best model
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            torch.save(model.state_dict(), best_model_file_name)
+            # torch.save(model.state_dict(), best_model_file_name)
             print(f"  → New best model saved!")
     
     print("\nTraining complete!")
