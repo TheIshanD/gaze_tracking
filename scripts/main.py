@@ -33,8 +33,8 @@ def main():
     GAZE_DATA_FOLDER = "../input_data/session_1/"         # Raw gaze data + video
     DATASET_FOLDER = "../processed_data/session_1/gaze_data"       # Where to save/load processed dataset
 
-    BATCH_SIZE = 16
-    EPOCHS = 15
+    BATCH_SIZE = 64 * 16
+    EPOCHS = 10
     LEARNING_RATE = 0.001
     TRAIN_RATIO = 0.9  # portion of fixations used for training
     NUM_FRAMES = 1 # Number of frames to use as temporal context
@@ -93,6 +93,7 @@ def main():
     
     # -------- Model Setup --------
     for mode in ["heatmap", "mlp"]:
+        print("MODE: " + mode)
         for criterion in [nn.MSELoss(), nn.L1Loss(), nn.SmoothL1Loss()]:
             for RUN_NUM in range(4):
                 print("RUN NUMBER: " + str(RUN_NUM))
