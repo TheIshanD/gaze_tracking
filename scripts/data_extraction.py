@@ -283,6 +283,62 @@ def load_train_val_data(dataset_folder):
     print(f"Loaded {len(train_data)} training samples and {len(val_data)} validation samples.")
     return train_data, val_data
 
+def extract_all_valid_gaze_frames(gaze_folder="000"):
+    """
+    Extract every video frame that has at least one valid gaze point.
+    
+    Rules:
+      - Take all frames with valid gaze data from gaze_positions.csv.
+      - If multiple gaze samples correspond to the same frame, use their median.
+      - Skip frames with no valid gaze or with invalid gaze coordinates.
+    
+    Returns:
+        list of dicts with keys:
+            'frame', 'gaze_x', 'gaze_y', 'frame_number'
+    """
+    print("Extracting all frames with valid gaze data...")
+
+    gaze_data = pd.read_csv(os.path.join(gaze_folder, "gaze_positions.csv"))
+    world_video_path = os.path.join(gaze_folder, "world.mp4")
+    cap = cv2.VideoCapture(world_video_path)
+
+    # Drop invalid rows
+    gaze_data = gaze_data.dropna(subset=["world_index", "norm_pos_x", "norm_pos_y"])
+    gaze_data = gaze_data[(gaze_data.norm_pos_x.between(0, 1)) & (gaze_data.norm_pos_y.between(0, 1))]
+
+    # Group by frame index
+    grouped = gaze_data.groupby("world_index")
+    all_data = []
+    skipped = 0
+
+    for frame_number, group in grouped:
+        gaze_x = np.median(group.norm_pos_x.values)
+        gaze_y = 1 - np.median(group.norm_pos_y.values)  # flip Y to image coordinates
+
+        # Skip invalid gaze
+        if not (0 <= gaze_x <= 1 and 0 <= gaze_y <= 1):
+            skipped += 1
+            continue
+
+        cap.set(cv2.CAP_PROP_POS_FRAMES, int(frame_number))
+        ret, frame = cap.read()
+        if not ret:
+            print(f"  WARNING: Could not read frame {frame_number}")
+            skipped += 1
+            continue
+
+        all_data.append({
+            "frame": frame,
+            "gaze_x": float(gaze_x),
+            "gaze_y": float(gaze_y),
+            "frame_number": int(frame_number)
+        })
+
+    cap.release()
+    print(f"\nExtracted {len(all_data)} valid frames total.")
+    print(f"Skipped {skipped} frames (invalid gaze or unreadable).")
+    return all_data
+
 
 # data, n_fixations = extract_fixation_frames("../input_data/session_1")
 # split_and_save_dataset(data, n_fixations, train_ratio=0.8, output_folder="../processed_data/session_1")

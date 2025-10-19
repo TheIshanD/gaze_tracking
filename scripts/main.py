@@ -9,7 +9,7 @@ import torch
 from torch.utils.data import DataLoader
 
 # Import custom modules
-from data_extraction import extract_fixation_frames, load_train_val_data, split_and_save_dataset, extract_fixation_frames_per_frame
+from data_extraction import extract_fixation_frames, load_train_val_data, split_and_save_dataset, extract_fixation_frames_per_frame, extract_all_valid_gaze_frames
 from dataset import GazeDataset, MultiFrameGazeDataset
 from model import SimpleGazeNet, GazeNetResNet, FrozenResNetBackbone, TinyGazeNet, UNetResNet18Gaze, UNetResNet18MultiFrameGaze, LightUNetResNet18MultiFrameGaze, UNetTemporalAttentionGaze
 from training import train_model
@@ -36,19 +36,19 @@ def main():
     EPOCHS = 15
     LEARNING_RATE = 0.001
     TRAIN_RATIO = 0.8  # portion of fixations used for training
-    NUM_FRAMES = 4 # Number of frames to use as temporal context
+    NUM_FRAMES = 8 # Number of frames to use as temporal context
     USE_NORMALIZED_COORDINATES = True
 
 
-    BEST_MODEL_FILE_NAME = f"../models/UNetTemporalAttentionGaze_{NUM_FRAMES}_frames.pth"
-    VALIDATION_PREDICTION_OUTPUT = f"../predictions/session_1_validation_predictions/UNetTemporalAttentionGaze_{NUM_FRAMES}_frames"
+    BEST_MODEL_FILE_NAME = f"../models/UNetTemporalAttentionGaze_{NUM_FRAMES}_frames_MSE.pth"
+    VALIDATION_PREDICTION_OUTPUT = f"../predictions/session_1_validation_predictions/UNetTemporalAttentionGaze_{NUM_FRAMES}_frames_MSE"
 
     OUTPUT_FRAME_RATE=15
 
     # -------- Data Preparation --------
     if not os.path.exists(DATASET_FOLDER) or not os.path.exists(os.path.join(DATASET_FOLDER, "train")) or not os.path.exists(os.path.join(DATASET_FOLDER, "train", "images")):
         print("=== EXTRACTING DATA (ALL FRAMES PER FIXATION) ===")
-        data, n_fixations = extract_fixation_frames_per_frame(GAZE_DATA_FOLDER)
+        data, n_fixations = extract_all_valid_gaze_frames(GAZE_DATA_FOLDER)
         split_and_save_dataset(data, n_fixations, train_ratio=TRAIN_RATIO, output_folder=DATASET_FOLDER)
     else:
         print("=== USING EXISTING DATASET ===")
