@@ -57,14 +57,14 @@ def main():
     train_data, val_data = load_train_val_data(DATASET_FOLDER)
     check_data_quality(train_data + val_data)
 
+    train_dataset = MultiFrameGazeDataset(train_data, num_frames=NUM_FRAMES, load_from_disk=False)
+    val_dataset = MultiFrameGazeDataset(val_data, num_frames=NUM_FRAMES, load_from_disk=False)
+
+    # -------- Dataloader Setup --------
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f"\n=== USING DEVICE: {device} ===")
+    
     for NUM_FRAMES in [1, 2, 4]:
-        train_dataset = MultiFrameGazeDataset(train_data, num_frames=NUM_FRAMES, load_from_disk=False)
-        val_dataset = MultiFrameGazeDataset(val_data, num_frames=NUM_FRAMES, load_from_disk=False)
-
-        # -------- Dataloader Setup --------
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        print(f"\n=== USING DEVICE: {device} ===")
-
         if device.type == 'cuda':
             train_loader = DataLoader(
                 train_dataset,
