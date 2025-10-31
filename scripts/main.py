@@ -32,8 +32,8 @@ def main():
     # -------- Configuration --------
     GAZE_DATA_FOLDER = "../input_data/session_1/"
 
-    VAL_DATA_POSITION = "start"
-    DATASET_FOLDER = f"../processed_data/session_1/gaze_data/val_{VAL_DATA_POSITION}"
+    VAL_DATA_POSITION = 0.1
+    DATASET_FOLDER = f"../processed_data/session_1/gaze_data/val_0.1"
 
     BATCH_SIZE = 64 * 8
     EPOCHS = 10
@@ -43,8 +43,8 @@ def main():
     USE_NORMALIZED_COORDINATES = True
 
 
-    BEST_MODEL_FILE_NAME = f"../models/UNetTemporalAttentionGaze_{NUM_FRAMES}_frames_MSE.pth"
-    VALIDATION_PREDICTION_OUTPUT = f"../predictions/session_1_validation_predictions/UNetTemporalAttentionGaze_{NUM_FRAMES}_frames_MSE"
+    BEST_MODEL_FILE_NAME = f"../models/UNetTemporalAttentionGaze_{NUM_FRAMES}_frames_MSE_0_1.pth"
+    VALIDATION_PREDICTION_OUTPUT = f"../predictions/session_1_validation_predictions/UNetTemporalAttentionGaze_{NUM_FRAMES}_frames_MSE_0_1"
 
     OUTPUT_FRAME_RATE=15
 
@@ -59,14 +59,14 @@ def main():
     train_data, val_data = load_train_val_data(DATASET_FOLDER)
     check_data_quality(train_data + val_data)
 
-    train_dataset = MultiFrameGazeDataset(train_data, num_frames=NUM_FRAMES, load_from_disk=False)
-    val_dataset = MultiFrameGazeDataset(val_data, num_frames=NUM_FRAMES, load_from_disk=False)
-
     # -------- Dataloader Setup --------
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"\n=== USING DEVICE: {device} ===")
     
     for NUM_FRAMES in [4]:
+        train_dataset = MultiFrameGazeDataset(train_data, num_frames=NUM_FRAMES, load_from_disk=False)
+        val_dataset = MultiFrameGazeDataset(val_data, num_frames=NUM_FRAMES, load_from_disk=False)
+
         if device.type == 'cuda':
             train_loader = DataLoader(
                 train_dataset,
@@ -138,16 +138,16 @@ def main():
                         print("\n=== SKIPPING TRAINING (Validation Only Mode) ===")
 
     # # -------- Validation + Visualization --------
-    # print("\n=== GENERATING VALIDATION VISUALIZATIONS ===")
-    # # model.load_state_dict(torch.load(BEST_MODEL_FILE_NAME, map_location=device))
-    # validate_and_visualize(model, val_dataset, device, output_folder=VALIDATION_PREDICTION_OUTPUT, use_normalized=USE_NORMALIZED_COORDINATES)
+    print("\n=== GENERATING VALIDATION VISUALIZATIONS ===")
+    model.load_state_dict(torch.load(BEST_MODEL_FILE_NAME, map_location=device))
+    validate_and_visualize(model, val_dataset, device, output_folder=VALIDATION_PREDICTION_OUTPUT, use_normalized=USE_NORMALIZED_COORDINATES)
 
-    # print("\n=== STITCHING IMAGES TO VIDEO ===")
-    # stitch_images_to_video(VALIDATION_PREDICTION_OUTPUT, frame_rate=OUTPUT_FRAME_RATE)
+    print("\n=== STITCHING IMAGES TO VIDEO ===")
+    stitch_images_to_video(VALIDATION_PREDICTION_OUTPUT, frame_rate=OUTPUT_FRAME_RATE)
 
-    # print("\n=== DONE ===")
-    # print(f"Best model saved to {BEST_MODEL_FILE_NAME}")
-    # print(f"Validation predictions saved to: {VALIDATION_PREDICTION_OUTPUT}")
+    print("\n=== DONE ===")
+    print(f"Best model saved to {BEST_MODEL_FILE_NAME}")
+    print(f"Validation predictions saved to: {VALIDATION_PREDICTION_OUTPUT}")
 
 
 if __name__ == "__main__":

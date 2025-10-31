@@ -41,8 +41,8 @@ def validate_and_visualize(model, val_dataset, device, output_folder='validation
                 orig_image = item['frame'].copy()
             
             # # Convert RGB to BGR if needed (cv2 uses BGR)
-            # if orig_image.shape[2] == 3:
-            #     orig_image = cv2.cvtColor(orig_image, cv2.COLOR_RGB2BGR)
+            if orig_image.shape[2] == 3:
+                orig_image = cv2.cvtColor(orig_image, cv2.COLOR_RGB2BGR)
             
             # Get image dimensions
             h, w = orig_image.shape[:2]
