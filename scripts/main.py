@@ -30,8 +30,10 @@ def main():
     args = parser.parse_args()
 
     # -------- Configuration --------
-    GAZE_DATA_FOLDER = "../input_data/session_1/"         # Raw gaze data + video
-    DATASET_FOLDER = "../processed_data/session_1/gaze_data"       # Where to save/load processed dataset
+    GAZE_DATA_FOLDER = "../input_data/session_1/"
+
+    VAL_DATA_POSITION = "start"
+    DATASET_FOLDER = f"../processed_data/session_1/gaze_data/val_{VAL_DATA_POSITION}"
 
     BATCH_SIZE = 64 * 8
     EPOCHS = 10
@@ -50,7 +52,7 @@ def main():
     if not os.path.exists(DATASET_FOLDER) or not os.path.exists(os.path.join(DATASET_FOLDER, "train")) or not os.path.exists(os.path.join(DATASET_FOLDER, "train", "images")):
         print("=== EXTRACTING DATA (ALL FRAMES PER FIXATION) ===")
         data, num_frames = extract_fixation_frames(GAZE_DATA_FOLDER)
-        split_and_save_dataset_fixations(data, num_frames, train_ratio=TRAIN_RATIO, output_folder=DATASET_FOLDER)
+        split_and_save_dataset_fixations(data, num_frames, train_ratio=TRAIN_RATIO, output_folder=DATASET_FOLDER, val_data=VAL_DATA_POSITION)
     else:
         print("=== USING EXISTING DATASET ===")
 
@@ -64,7 +66,7 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"\n=== USING DEVICE: {device} ===")
     
-    for NUM_FRAMES in [1, 2, 4]:
+    for NUM_FRAMES in [4]:
         if device.type == 'cuda':
             train_loader = DataLoader(
                 train_dataset,
@@ -94,9 +96,9 @@ def main():
 
         print("USING NUM_FRAMES: " + str(NUM_FRAMES))
         # -------- Model Setup --------
-        for mode in ["heatmap", "mlp"]:
+        for mode in ["heatmap"]:
             print("MODE: " + mode)
-            for criterion in [nn.MSELoss(), nn.L1Loss(), nn.SmoothL1Loss(), nn.HuberLoss()]:
+            for criterion in [nn.SmoothL1Loss()]:
                 print("CRITERION: " + str(criterion))
                 for RUN_NUM in range(4):
                     print("RUN NUMBER: " + str(RUN_NUM))

@@ -187,10 +187,20 @@ def extract_fixation_frames_per_frame(gaze_folder="000"):
     return all_data, len(fixations)
 
 
-def split_and_save_dataset_fixations(data, n_fixations, train_ratio=0.8, output_folder="dataset"):
+import os
+import cv2
+import pandas as pd
+
+def split_and_save_dataset_fixations(data, n_fixations, train_ratio=0.8, output_folder="dataset", val_data="end"):
     """
     Split data by fixation index (chronologically), not randomly.
-    First train_ratio% fixations → training, remainder → validation.
+    
+    Parameters:
+        data: list of dicts with keys ['frame', 'gaze_x', 'gaze_y', 'fixation_id', 'frame_number']
+        n_fixations: total number of fixations
+        train_ratio: fraction of fixations for training (default 0.8)
+        output_folder: where to save train/val sets
+        val_data: "end" (validation is last X%) or "start" (validation is first X%)
     """
     os.makedirs(output_folder, exist_ok=True)
     train_folder = os.path.join(output_folder, "train")
@@ -202,10 +212,19 @@ def split_and_save_dataset_fixations(data, n_fixations, train_ratio=0.8, output_
     train_labels, val_labels = [], []
 
     cutoff_fixation = int(train_ratio * n_fixations)
-    print(f"Splitting fixations: first {cutoff_fixation}/{n_fixations} for training.")
+
+    if val_data == "end":
+        print(f"Validation = last {n_fixations - cutoff_fixation} fixations ({100 * (1 - train_ratio):.1f}%)")
+        train_condition = lambda fix_id: fix_id < cutoff_fixation
+    elif val_data == "start":
+        print(f"Validation = first {n_fixations - cutoff_fixation} fixations ({100 * (1 - train_ratio):.1f}%)")
+        train_condition = lambda fix_id: fix_id >= (n_fixations - cutoff_fixation)
+    else:
+        raise ValueError("val_data must be either 'end' or 'start'")
 
     for i, item in enumerate(data):
-        folder = train_folder if item["fixation_id"] < cutoff_fixation else val_folder
+        is_train = train_condition(item["fixation_id"])
+        folder = train_folder if is_train else val_folder
         img_folder = os.path.join(folder, "images")
 
         img_path = os.path.join(img_folder, f'frame_{i:06d}.jpg')
@@ -215,16 +234,15 @@ def split_and_save_dataset_fixations(data, n_fixations, train_ratio=0.8, output_
             'image_path': img_path,
             'gaze_x': item['gaze_x'],
             'gaze_y': item['gaze_y'],
-            # 'fixation_id': item['fixation_id'],
             'frame_number': item['frame_number']
         }
 
-        if folder == train_folder:
+        if is_train:
             train_labels.append(label_entry)
         else:
             val_labels.append(label_entry)
 
-    # Save labels
+    # Save CSVs
     pd.DataFrame(train_labels).to_csv(os.path.join(train_folder, "labels.csv"), index=False)
     pd.DataFrame(val_labels).to_csv(os.path.join(val_folder, "labels.csv"), index=False)
 
